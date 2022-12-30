@@ -1,8 +1,35 @@
 [package]
 name = "aucpace"
 version = "0.1.0"
+authors = ["Sam Leonard <tritoke@protonmail.com>"]
+description = "AuCPace protocol implementation"
+documentation = "https://docs.rs/aucpace"
+homepage = "https://github.com/RustCrypto/PAKEs"
+repository = "https://github.com/RustCrypto/PAKEs/tree/master/aucpace"
+license = "MIT OR Apache-2.0"
+keywords = ["crypto", "pake", "authentication"]
+categories = ["cryptography", "authentication"]
+exclude = [".gitignore"]
+readme = "README.md"
 edition = "2021"
+rust-version = "1.57"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+curve25519-dalek = { version = "3", default-features = false }
+digest = { version = "0.10", default-features = false }
+password-hash = { version = "0.4", default-features = false }
+rand_core = { version = "0.6", default-features = false }
+scrypt = { version = "0.10", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+x25519-dalek = { version = "1.2", default-features = false }
+
+[features]
+default = ["u64_backend"]
+debug = []
+u32_backend = ["curve25519-dalek/u32_backend", "x25519-dalek/u32_backend"]
+u64_backend = ["curve25519-dalek/u64_backend", "x25519-dalek/u64_backend"]
+fiat-u32_backend = ["curve25519-dalek/fiat_u32_backend", "x25519-dalek/fiat_u32_backend"]
+fiat-u64_backend = ["curve25519-dalek/fiat_u64_backend", "x25519-dalek/fiat_u64_backend"]
+
