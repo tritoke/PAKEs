@@ -18,12 +18,10 @@ rust-version = "1.57"
 
 [dependencies]
 curve25519-dalek = { version = "3", default-features = false }
-digest = { version = "0.10", default-features = false }
-password-hash = { version = "0.4", default-features = false }
-rand_core = { version = "0.6", default-features = false }
-scrypt = { version = "0.10", default-features = false }
-sha2 = { version = "0.10", default-features = false }
 x25519-dalek = { version = "1.2", default-features = false }
+password-hash = { version = "0.4", default-features = false }
+rand_core = { version = "0.5", default-features = false }
+subtle = { version = "2.4", default-features = false }
 
 [features]
 default = ["u64_backend"]
