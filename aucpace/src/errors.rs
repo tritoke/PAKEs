@@ -10,6 +10,8 @@ pub enum Error {
     HashEmpty,
     /// PasswordHasher produced a hash of an invalid size (size was not 32 or 64 bytes)
     HashSizeInvalid,
+    /// Failure during Explicit Mutual Authentication
+    MutualAuthFail,
 }
 
 impl fmt::Display for Error {
@@ -18,6 +20,10 @@ impl fmt::Display for Error {
             Error::PasswordHashing(error) => write!(f, "Error while hashing password: {error}"),
             Error::HashEmpty => write!(f, "password hash empty"),
             Error::HashSizeInvalid => write!(f, "password hash invalid, should be 32 or 64 bytes"),
+            Error::MutualAuthFail => write!(
+                f,
+                "explicit mutual authentication failed, authenticators didn't match"
+            ),
         }
     }
 }
