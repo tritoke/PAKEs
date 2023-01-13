@@ -202,12 +202,16 @@ where
 
     /// Generate a public key
     /// moving the protocol onto the second half of the CPace substep - Receive Client Pubkey
-    pub fn generate_public_key(
+    pub fn generate_public_key<CI: AsRef<[u8]>>(
         mut self,
-        channel_identifier: impl AsRef<[u8]>,
+        channel_identifier: CI,
     ) -> (AuCPaceServerRecvClientKey<D, K1>, ServerMessage<D, K1>) {
-        let (priv_key, pub_key) =
-            generate_keypair::<D, CSPRNG>(&mut self.rng, self.ssid, self.prs, channel_identifier);
+        let (priv_key, pub_key) = generate_keypair::<D, CSPRNG, CI>(
+            &mut self.rng,
+            self.ssid,
+            self.prs,
+            channel_identifier,
+        );
 
         let next_step = AuCPaceServerRecvClientKey::new(self.ssid, priv_key);
         let message = ServerMessage::CPaceSubstep(pub_key);

@@ -56,15 +56,16 @@ pub(crate) fn compute_ssid<D: Digest + Default, const K1: usize>(
 
 /// Generate a Diffie-Hellman keypair for the CPace substep of the protocol
 #[inline(always)]
-pub(crate) fn generate_keypair<D, CSPRNG>(
+pub(crate) fn generate_keypair<D, CSPRNG, CI>(
     rng: &mut CSPRNG,
     ssid: Output<D>,
     prs: [u8; 32],
-    ci: impl AsRef<[u8]>,
+    ci: CI,
 ) -> (Scalar, RistrettoPoint)
 where
     D: Digest<OutputSize = U64> + Default,
     CSPRNG: RngCore + CryptoRng,
+    CI: AsRef<[u8]>,
 {
     let mut hasher: D = H1();
     hasher.update(ssid);

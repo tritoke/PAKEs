@@ -11,9 +11,10 @@ use curve25519_dalek::{
     ristretto::RistrettoPoint,
     scalar::Scalar,
 };
-use password_hash::{PasswordHash, PasswordHasher, Salt};
+use password_hash::{PasswordHash, PasswordHasher, Salt, SaltString};
 use rand_core::{CryptoRng, RngCore};
 use std::marker::PhantomData;
+use std::ptr::hash;
 use subtle::ConstantTimeEq;
 
 /// Implementation of the client side of the AuCPace protocol
@@ -121,8 +122,42 @@ where
         Self { ssid, username }
     }
 
-    pub fn generate_cpace(self) -> AuCPaceClientCPaceSubstep<D, K1> {
-        todo!()
+    pub fn generate_cpace<'salt, H>(
+        self,
+        x_pub: RistrettoPoint,
+        password: impl AsRef<[u8]>,
+        salt: impl Into<Salt<'salt>>,
+        params: H::Params,
+        hasher: H,
+    ) -> Result<AuCPaceClientCPaceSubstep<D, K1>>
+    where
+        H: PasswordHasher,
+    {
+        let cofactor = Scalar::one();
+        let pw_hash = hash_password(self.username, password, salt, params, hasher)?;
+        let hash = pw_hash.hash.ok_or(Error::HashEmpty)?;
+        let hash_bytes = hash.as_bytes();
+
+        // support both 32 and 64 byte hashes
+        let w = match hash_bytes.len() {
+            32 => {
+                let arr = hash_bytes
+                    .try_into()
+                    .expect("slice length invariant broken");
+                Scalar::from_bytes_mod_order(arr)
+            }
+            64 => {
+                let arr = hash_bytes
+                    .try_into()
+                    .expect("slice length invariant broken");
+                Scalar::from_bytes_mod_order_wide(arr)
+            }
+            _ => return Err(Error::HashSizeInvalid),
+        };
+
+        let prs = (x_pub * (w * cofactor)).compress().to_bytes();
+
+        Ok(AuCPaceClientCPaceSubstep::new(self.ssid, prs))
     }
 }
 
@@ -140,6 +175,84 @@ where
 {
     fn new(ssid: Output<D>, prs: [u8; 32]) -> Self {
         Self { ssid, prs }
+    }
+
+    /// Generate a public key
+    /// moving the protocol onto the second half of the CPace substep - Receive Server Pubkey
+    pub fn generate_public_key<CI, CSPRNG>(
+        mut self,
+        channel_identifier: CI,
+        rng: &mut CSPRNG,
+    ) -> (
+        AuCPaceClientRecvServerKey<D, K1>,
+        ClientMessage<'static, D, K1>,
+    )
+    where
+        CI: AsRef<[u8]>,
+        CSPRNG: RngCore + CryptoRng,
+    {
+        let (priv_key, pub_key) =
+            generate_keypair::<D, CSPRNG, CI>(rng, self.ssid, self.prs, channel_identifier);
+
+        let next_step = AuCPaceClientRecvServerKey::new(self.ssid, priv_key);
+        let message = ClientMessage::PublicKey(pub_key);
+
+        (next_step, message)
+    }
+}
+
+pub struct AuCPaceClientRecvServerKey<D, const K1: usize>
+where
+    D: Digest<OutputSize = U64> + Default,
+{
+    ssid: Output<D>,
+    priv_key: Scalar,
+}
+
+impl<D, const K1: usize> AuCPaceClientRecvServerKey<D, K1>
+where
+    D: Digest<OutputSize = U64> + Default,
+{
+    fn new(ssid: Output<D>, priv_key: Scalar) -> Self {
+        Self { ssid, priv_key }
+    }
+
+    /// Generate a public key
+    /// moving the protocol onto the second half of the CPace substep - Receive Server Pubkey
+    pub fn receive_server_pubkey(
+        self,
+        server_pubkey: RistrettoPoint,
+    ) -> AuCPaceClientExpMutAuth<D, K1> {
+        // TODO: verify the server pubkey here - how??
+        let sk1 = compute_first_session_key::<D>(self.ssid, self.priv_key, server_pubkey);
+        AuCPaceClientExpMutAuth::new(self.ssid, sk1)
+    }
+}
+
+/// Server in the Explicity Mutual Authenticaton phase
+pub struct AuCPaceClientExpMutAuth<D, const K1: usize>
+where
+    D: Digest<OutputSize = U64> + Default,
+{
+    ssid: Output<D>,
+    sk1: Output<D>,
+}
+
+impl<D, const K1: usize> AuCPaceClientExpMutAuth<D, K1>
+where
+    D: Digest<OutputSize = U64> + Default,
+{
+    fn new(ssid: Output<D>, sk1: Output<D>) -> Self {
+        Self { ssid, sk1 }
+    }
+
+    pub fn receive_server_authenticator(self, server_authenticator: [u8; 64]) -> Result<Output<D>> {
+        let (ta, tb) = compute_authenticator_messages::<D>(self.ssid, self.sk1);
+        if tb.as_ref().ct_eq(&server_authenticator).into() {
+            Ok(compute_session_key::<D>(self.ssid, self.sk1))
+        } else {
+            Err(Error::MutualAuthFail)
+        }
     }
 }
 
@@ -302,6 +415,9 @@ where
 
     /// Username - the client's username
     Username(&'a [u8]),
+
+    /// PublicKey - the client's public key: `Ya`
+    PublicKey(RistrettoPoint),
 
     /// Explicit Mutual Authentication - the client's authenticator: `Tb`
     ClientAuthenticator(Output<D>),
