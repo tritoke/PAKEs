@@ -56,12 +56,7 @@ where
     }
 
     /// Begin the protocol
-    pub fn begin(
-        &mut self,
-    ) -> (
-        AuCPaceServerSsidEstablish<D, CSPRNG, K1>,
-        ServerMessage<D, K1>,
-    ) {
+    pub fn begin(&mut self) -> (AuCPaceServerSsidEstablish<D, K1>, ServerMessage<D, K1>) {
         let next_step = AuCPaceServerSsidEstablish::new(self.secret.clone(), &mut self.rng);
         let message = ServerMessage::SsidEstablish(next_step.nonce);
         (next_step, message)
@@ -69,28 +64,27 @@ where
 }
 
 /// Server in the SSID agreement phase
-pub struct AuCPaceServerSsidEstablish<D, CSPRNG, const K1: usize>
+pub struct AuCPaceServerSsidEstablish<D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
-    CSPRNG: RngCore + CryptoRng,
 {
     secret: ServerSecret,
     nonce: [u8; K1],
     _d: PhantomData<D>,
-    _csprng: PhantomData<CSPRNG>,
 }
 
-impl<D, CSPRNG, const K1: usize> AuCPaceServerSsidEstablish<D, CSPRNG, K1>
+impl<D, const K1: usize> AuCPaceServerSsidEstablish<D, K1>
 where
     D: Digest<OutputSize = U64> + Default,
-    CSPRNG: RngCore + CryptoRng,
 {
-    fn new(secret: ServerSecret, rng: &mut CSPRNG) -> Self {
+    fn new<CSPRNG>(secret: ServerSecret, rng: &mut CSPRNG) -> Self
+    where
+        CSPRNG: RngCore + CryptoRng,
+    {
         Self {
             secret,
             nonce: generate_nonce(rng),
             _d: Default::default(),
-            _csprng: Default::default(),
         }
     }
 
