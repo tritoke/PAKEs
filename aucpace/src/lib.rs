@@ -90,9 +90,27 @@ mod errors;
 mod server;
 mod utils;
 
+#[rustfmt::skip]
 pub use self::{
-    client::AuCPaceClient,
+    client::{
+        AuCPaceClient,
+        AuCPaceClientSsidEstablish,
+        AuCPaceClientPreAug,
+        AuCPaceClientAugLayer,
+        AuCPaceClientCPaceSubstep,
+        AuCPaceClientRecvServerKey,
+        AuCPaceClientExpMutAuth,
+        ClientMessage,
+    },
+    server::{
+        AuCPaceServer,
+        AuCPaceServerSsidEstablish,
+        AuCPaceServerAugLayer,
+        AuCPaceServerCPaceSubstep,
+        AuCPaceServerRecvClientKey,
+        AuCPaceServerExpMutAuth,
+        ServerMessage,
+    },
     database::Database,
-    errors::{Error, Result},
-    server::AuCPaceServer,
+    errors::{ Error, Result },
 };

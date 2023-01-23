@@ -11,10 +11,9 @@ use curve25519_dalek::{
     ristretto::RistrettoPoint,
     scalar::Scalar,
 };
-use password_hash::{PasswordHash, PasswordHasher, Salt, SaltString};
+use password_hash::{PasswordHash, PasswordHasher, Salt};
 use rand_core::{CryptoRng, RngCore};
 use std::marker::PhantomData;
-use std::ptr::hash;
 use subtle::ConstantTimeEq;
 
 /// Implementation of the client side of the AuCPace protocol
@@ -41,7 +40,11 @@ where
     }
 
     /// Create a new client in the SSID agreement phase
-    pub fn begin<'a>(&mut self) -> (AuCPaceClientSsidEstablish<D, K1>, ClientMessage<D, K1>) {
+    ///
+    /// # Return
+    /// `next_step`: the client in the SSID establishment stage
+    ///
+    pub fn begin(&mut self) -> (AuCPaceClientSsidEstablish<D, K1>, ClientMessage<'_, D, K1>) {
         let next_step = AuCPaceClientSsidEstablish::new(&mut self.rng);
         let message = ClientMessage::ClientNonce(next_step.nonce);
 
@@ -73,6 +76,13 @@ where
     }
 
     /// Consume the server's nonce - `s` and progress to the Augmentation Layer
+    ///
+    /// # Arguments:
+    /// - `s` - the server nonce
+    ///
+    /// # Return
+    /// `next_step`: the client in the pre-augmentation stage
+    ///
     pub fn agree_ssid(self, server_nonce: [u8; K1]) -> AuCPaceClientPreAug<D, K1> {
         let ssid = compute_ssid::<D, K1>(server_nonce, self.nonce);
         AuCPaceClientPreAug::new(ssid)
@@ -180,7 +190,7 @@ where
     /// Generate a public key
     /// moving the protocol onto the second half of the CPace substep - Receive Server Pubkey
     pub fn generate_public_key<CI, CSPRNG>(
-        mut self,
+        self,
         channel_identifier: CI,
         rng: &mut CSPRNG,
     ) -> (
@@ -217,42 +227,62 @@ where
         Self { ssid, priv_key }
     }
 
-    /// Generate a public key
-    /// moving the protocol onto the second half of the CPace substep - Receive Server Pubkey
     pub fn receive_server_pubkey(
         self,
         server_pubkey: RistrettoPoint,
-    ) -> AuCPaceClientExpMutAuth<D, K1> {
+    ) -> (
+        AuCPaceClientExpMutAuth<D, K1>,
+        ClientMessage<'static, D, K1>,
+    ) {
         // TODO: verify the server pubkey here - how??
         let sk1 = compute_first_session_key::<D>(self.ssid, self.priv_key, server_pubkey);
-        AuCPaceClientExpMutAuth::new(self.ssid, sk1)
+        let (ta, tb) = compute_authenticator_messages::<D>(self.ssid, sk1.clone());
+        let next_step = AuCPaceClientExpMutAuth::new(self.ssid, sk1, ta);
+        let message = ClientMessage::ClientAuthenticator(tb);
+        (next_step, message)
     }
 }
 
-/// Server in the Explicity Mutual Authenticaton phase
+/// Server in the Explicit Mutual Authenticaton phase
 pub struct AuCPaceClientExpMutAuth<D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
 {
     ssid: Output<D>,
     sk1: Output<D>,
+    server_authenticator: Output<D>,
 }
 
 impl<D, const K1: usize> AuCPaceClientExpMutAuth<D, K1>
 where
     D: Digest<OutputSize = U64> + Default,
 {
-    fn new(ssid: Output<D>, sk1: Output<D>) -> Self {
-        Self { ssid, sk1 }
+    fn new(ssid: Output<D>, sk1: Output<D>, server_authenticator: Output<D>) -> Self {
+        Self {
+            ssid,
+            sk1,
+            server_authenticator,
+        }
     }
 
     pub fn receive_server_authenticator(self, server_authenticator: [u8; 64]) -> Result<Output<D>> {
-        let (ta, tb) = compute_authenticator_messages::<D>(self.ssid, self.sk1);
-        if tb.as_ref().ct_eq(&server_authenticator).into() {
+        if self
+            .server_authenticator
+            .as_ref()
+            .ct_eq(&server_authenticator)
+            .into()
+        {
             Ok(compute_session_key::<D>(self.ssid, self.sk1))
         } else {
             Err(Error::MutualAuthFail)
         }
+    }
+
+    /// Allow the user to exit the protocol early in the case of implicit authentication
+    /// Note: this should only be used in special circumstances and the
+    ///       explicit mutual authentication stage should be used in all other cases
+    pub fn implicit_auth(self) -> Output<D> {
+        compute_session_key::<D>(self.ssid, self.sk1)
     }
 }
 
