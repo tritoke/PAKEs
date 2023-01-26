@@ -41,8 +41,10 @@ where
 
     /// Create a new client in the SSID agreement phase
     ///
-    /// # Return
-    /// `next_step`: the client in the SSID establishment stage
+    /// # Return:
+    /// (`next_step`, `message`)
+    /// - `next_step`: the client in the SSID establishment stage
+    /// - `messsage`: the message to send to the server
     ///
     pub fn begin(&mut self) -> (AuCPaceClientSsidEstablish<D, K1>, ClientMessage<'_, D, K1>) {
         let next_step = AuCPaceClientSsidEstablish::new(&mut self.rng);
@@ -52,7 +54,7 @@ where
     }
 }
 
-/// Client in the SSID agreement phase
+/// AuCPace Client in the SSID agreement phase
 pub struct AuCPaceClientSsidEstablish<D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
@@ -75,12 +77,12 @@ where
         }
     }
 
-    /// Consume the server's nonce - `s` and progress to the Augmentation Layer
+    /// Consume the server's nonce - `s` and progress to the augmentation layer
     ///
-    /// # Arguments:
-    /// - `s` - the server nonce
+    /// # arguments:
+    /// - `server_nonce` - the nonce received from the server
     ///
-    /// # Return
+    /// # return:
     /// `next_step`: the client in the pre-augmentation stage
     ///
     pub fn agree_ssid(self, server_nonce: [u8; K1]) -> AuCPaceClientPreAug<D, K1> {
@@ -89,6 +91,7 @@ where
     }
 }
 
+/// AuCPace Client in the pre-augmentation phase
 pub struct AuCPaceClientPreAug<D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
@@ -105,6 +108,15 @@ where
     }
 
     /// Consume the client's username and begin the augmentation layer
+    ///
+    /// # Arguments:
+    /// - `username` - a reference to the client's username
+    ///
+    /// # Return:
+    /// (`next_step`, `message`)
+    /// - `next_step`: the client in the augmentation layer
+    /// - `message`: the message to send to the server
+    ///
     pub fn start_augmentation(
         self,
         username: &[u8],
@@ -116,6 +128,7 @@ where
     }
 }
 
+/// AuCPace Client in the augmentation layer
 pub struct AuCPaceClientAugLayer<'a, D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
@@ -132,6 +145,22 @@ where
         Self { ssid, username }
     }
 
+    /// Process the augmentation layer information from the server, hashes the user's password
+    /// together with their username, then computes `w` and `PRS`.
+    ///
+    /// # Arguments:
+    /// - `x_pub` - `x` from the protocol definition, used in generating the password related string (prs)
+    /// - `password` - the user's password
+    /// - `salt` - the salt value sent by the server
+    /// - `params` - the parameters used by the hasher
+    /// - `hasher` - the hasher to use when computing `w`
+    ///
+    /// # Return:
+    /// either
+    /// - ok(`next_step`): the client in the cpace substep
+    /// - err(error::passwordhashing(hasher_error) | error::hashempty | error::hashsizeinvalid):
+    ///     one of the three error variants that can result from the password hashing process
+    ///
     pub fn generate_cpace<'salt, H>(
         self,
         x_pub: RistrettoPoint,
@@ -171,6 +200,7 @@ where
     }
 }
 
+/// AuCPace Client in the CPace substep
 pub struct AuCPaceClientCPaceSubstep<D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
@@ -189,6 +219,18 @@ where
 
     /// Generate a public key
     /// moving the protocol onto the second half of the CPace substep - Receive Server Pubkey
+    ///
+    /// # Arguments:
+    /// - `channel_identifier` - `CI` from the protocol definition, in the context of TCP/IP this
+    ///     is usually some combination of the server and client's IP address and TCP port numbers.
+    ///     It's purpose is to prevent relay attacks.
+    /// - `rng` - the CSPRNG used when generating the public/private keypair
+    ///
+    /// # Return:
+    /// (`next_step`, `message`)
+    /// - `next_step`: the client waiting for the server's public key
+    /// - `message`: the message to send to the server
+    ///
     pub fn generate_public_key<CI, CSPRNG>(
         self,
         channel_identifier: CI,
@@ -211,6 +253,7 @@ where
     }
 }
 
+/// AuCPace Client waiting to receive the server's public key
 pub struct AuCPaceClientRecvServerKey<D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
@@ -227,6 +270,17 @@ where
         Self { ssid, priv_key }
     }
 
+    /// Receive the server's public key
+    /// This completes the CPace substep and moves the client on to explicit mutual authentication.
+    ///
+    /// # Arguments:
+    /// - `server_pubkey` - the server's public key
+    ///
+    /// # Return:
+    /// (`next_step`, `message`)
+    /// - `next_step`: the client in the Explicit Mutual Authentication phase
+    /// - `message`: the message to send to the server
+    ///
     pub fn receive_server_pubkey(
         self,
         server_pubkey: RistrettoPoint,
@@ -240,6 +294,21 @@ where
         let next_step = AuCPaceClientExpMutAuth::new(self.ssid, sk1, ta);
         let message = ClientMessage::ClientAuthenticator(tb);
         (next_step, message)
+    }
+
+    /// Allow the user to exit the protocol early in the case of implicit authentication
+    /// Note: this should only be used in special circumstances and the
+    ///       explicit mutual authentication stage should be used in all other cases
+    ///
+    /// # Arguments:
+    /// - `server_pubkey` - the server's public key
+    ///
+    /// # Return:
+    /// `sk`: the session key reached by the AuCPace protocol
+    ///
+    pub fn implicit_auth(self, server_pubkey: RistrettoPoint) -> Output<D> {
+        let sk1 = compute_first_session_key::<D>(self.ssid, self.priv_key, server_pubkey);
+        compute_session_key::<D>(self.ssid, sk1)
     }
 }
 
@@ -265,6 +334,18 @@ where
         }
     }
 
+    /// Receive the server's authenticator.
+    /// This completes the protocol and returns the derived key.
+    ///
+    /// # Arguments:
+    /// - `server_authenticator` - the server's authenticator
+    ///
+    /// # Return:
+    /// either:
+    /// - Ok(`sk`): the session key reached by the AuCPace protocol
+    /// - Err(Error::MutualAuthFail): an error if the authenticator we computed doesn't match
+    ///     the server's authenticator, compared in constant time.
+    ///
     pub fn receive_server_authenticator(self, server_authenticator: [u8; 64]) -> Result<Output<D>> {
         if self
             .server_authenticator
@@ -277,165 +358,9 @@ where
             Err(Error::MutualAuthFail)
         }
     }
-
-    /// Allow the user to exit the protocol early in the case of implicit authentication
-    /// Note: this should only be used in special circumstances and the
-    ///       explicit mutual authentication stage should be used in all other cases
-    pub fn implicit_auth(self) -> Output<D> {
-        compute_session_key::<D>(self.ssid, self.sk1)
-    }
 }
 
-//     /// Generate a nonce for ssid establishment
-//     ///
-//     /// # Return:
-//     /// `nonce` - a fresh ephemeral nonce for establishing an sub-session ID with the client
-//     pub fn generate_client_nonce(&mut self) -> [u8; K1] {
-//         generate_nonce(&mut self.rng)
-//     }
-//
-//     /// Computes the SSID from the server and client nonces
-//     ///
-//     /// # Arguments:
-//     /// - `s` - the server nonce
-//     /// - `t` - the client nonce
-//     ///
-//     /// # Return
-//     /// `hash`: the output of hashing the concatenation of these nonces
-//     ///         - `H0(s || t)`
-//     pub fn compute_ssid(&self, s: [u8; K1], t: [u8; K1]) -> Output<D> {
-//         compute_ssid::<D, K1>(s, t)
-//     }
-//
-//     /// Compute the password related string
-//     ///
-//     /// # Arguments:
-//     /// - `x_pub`: public X used to verify the user's password
-//     /// - `username`: username of authenticating user
-//     /// - `password`: password of authenticating user
-//     /// - `salt`: salt used in hashing the user's password during registration
-//     /// - `params`: parameters of the password hashing algorithm used
-//     /// - `hasher`: password hasher to use
-//     ///
-//     /// # Return:
-//     /// - `Ok(PRS)` - the computation suceeded, PRS is the password related string
-//     /// - `Err(Error::PasswordHashing(_))` - the hasher returned an error while hashing
-//     /// - `Err(Error::HashEmpty)` - the hasher returned an empty hash
-//     /// - `Err(Error::HashSizeInvalid)` - the hasher returned a hash of the wrong size
-//     ///                                   - only hashes of 32 bytes or 64 bytes are permitted.
-//     pub fn compute_prs<H>(
-//         &self,
-//         x_pub: RistrettoPoint,
-//         username: impl AsRef<[u8]>,
-//         password: impl AsRef<[u8]>,
-//         salt: Salt<'_>,
-//         params: H::Params,
-//         hasher: H,
-//     ) -> Result<[u8; 32]>
-//     where
-//         H: PasswordHasher,
-//     {
-//         let cofactor = Scalar::one();
-//         let pw_hash = hash_password(username, password, salt, params, hasher)?;
-//         let hash = pw_hash.hash.ok_or(Error::HashEmpty)?;
-//         let hash_bytes = hash.as_bytes();
-//
-//         // support both 32 and 64 byte hashes
-//         let w = match hash_bytes.len() {
-//             32 => {
-//                 let arr = hash_bytes
-//                     .try_into()
-//                     .expect("slice length invariant broken");
-//                 Scalar::from_bytes_mod_order(arr)
-//             }
-//             64 => {
-//                 let arr = hash_bytes
-//                     .try_into()
-//                     .expect("slice length invariant broken");
-//                 Scalar::from_bytes_mod_order_wide(arr)
-//             }
-//             _ => return Err(Error::HashSizeInvalid),
-//         };
-//
-//         Ok((x_pub * (w * cofactor)).compress().to_bytes())
-//     }
-//
-//     /// Generate the diffie-hellman key pair for the CPace substep of the protocol
-//     /// Arguments:
-//     /// - ssid: sub-session identifier
-//     /// - prs: password related string
-//     /// - ci: channel identifier
-//     ///
-//     /// Returns:
-//     /// `(private key, public key)`
-//     /// `private key` is used to generate the shared key
-//     /// `public key` is sent to the server to allow them to compute the shared key
-//     pub fn generate_keypair(
-//         &mut self,
-//         ssid: Output<D>,
-//         prs: [u8; 32],
-//         ci: impl AsRef<[u8]>,
-//     ) -> (Scalar, RistrettoPoint) {
-//         generate_keypair::<D, CSPRNG>(&mut self.rng, ssid, prs, ci)
-//     }
-//
-//     /// Compute the first session key sk1 from the SSID, our private key and their public key
-//     ///
-//     /// # Arguments:
-//     /// - `ssid`: sub-session identifier
-//     /// - `prs`: password related string
-//     /// - `ci`: channel identifier
-//     ///
-//     /// # Return:
-//     /// `sk1` - the first session key
-//     pub fn compute_first_session_key(
-//         &self,
-//         ssid: Output<D>,
-//         priv_key: Scalar,
-//         pub_key: RistrettoPoint,
-//     ) -> Output<D> {
-//         compute_first_session_key::<D>(ssid, priv_key, pub_key)
-//     }
-//
-//     /// Compute the authenticator messages Ta and Tb
-//     ///
-//     /// # Arguments:
-//     /// - `ssid`: sub-session identifier
-//     /// - `prss`: sub-session identifier
-//     ///
-//     /// # Return:
-//     /// `(Ta, Tb)`
-//     /// where Tb is the authenticator message to be sent to the server
-//     /// and Ta is the value used to verify the authenticator message from the server
-//     pub fn compute_authenticator_messages(
-//         &self,
-//         ssid: Output<D>,
-//         first_session_key: Output<D>,
-//     ) -> (Output<D>, Output<D>) {
-//         compute_authenticator_messages::<D>(ssid, first_session_key)
-//     }
-//
-//     /// Checks whether the server authenticator is valid in **constant time**
-//     ///
-//     /// # Arguments:
-//     /// - `tb`: the server authenticator we computed
-//     /// - `server_tb`: the server authenticator sent by the server
-//     pub fn is_server_authenticator_valid(&self, tb: Output<D>, server_tb: &[u8; 64]) -> bool {
-//         tb.as_ref().ct_eq(server_tb).into()
-//     }
-//
-//     /// Compute the shared session key
-//     ///
-//     /// # Arguments:
-//     /// - `ssid`: the sub-session ID
-//     /// - `sk1`: the first session key
-//     ///
-//     /// # Return:
-//     /// `sk` - the final session key
-//     pub fn compute_session_key(&self, ssid: Output<D>, sk1: Output<D>) -> Output<D> {
-//         compute_session_key::<D>(ssid, sk1)
-//     }
-
+/// An enum representing the different messages the client can send to the server
 pub enum ClientMessage<'a, D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
@@ -464,8 +389,8 @@ fn hash_password<'a, H>(
 where
     H: PasswordHasher,
 {
-    // this is a stop-gap solution so I can use the function before
-    // I work out how to do this without allocating...
+    // TODO: this is a stop-gap solution so I can use the function before
+    //       I work out how to do this without allocating...
 
     // hash "{username}:{password}"
     let mut v = username.as_ref().to_vec();

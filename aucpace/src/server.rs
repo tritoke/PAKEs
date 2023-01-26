@@ -16,6 +16,7 @@ use rand_core::{CryptoRng, RngCore};
 use std::marker::PhantomData;
 use subtle::ConstantTimeEq;
 
+/// A non-copy wrapper around u64
 #[derive(Clone)]
 struct ServerSecret(u64);
 
@@ -55,7 +56,13 @@ where
         }
     }
 
-    /// Begin the protocol
+    /// Create a new server in the SSID agreement phase
+    ///
+    /// # Return:
+    /// (`next_step`, `message`)
+    /// - `next_step`: the server in the SSID establishment stage
+    /// - `messsage`: the message to send to the server
+    ///
     pub fn begin(&mut self) -> (AuCPaceServerSsidEstablish<D, K1>, ServerMessage<D, K1>) {
         let next_step = AuCPaceServerSsidEstablish::new(self.secret.clone(), &mut self.rng);
         let message = ServerMessage::SsidEstablish(next_step.nonce);
@@ -88,7 +95,14 @@ where
         }
     }
 
-    /// Consume the client's nonce - `t` and progress to the Augmentation Layer
+    /// Consume the client's nonce - `t` and progress to the augmentation layer
+    ///
+    /// # arguments:
+    /// - `client_nonce` - the nonce received from the server
+    ///
+    /// # return:
+    /// `next_step`: the server in the augmentation layer
+    ///
     pub fn agree_ssid(self, client_nonce: [u8; K1]) -> AuCPaceServerAugLayer<D, K1> {
         let ssid = compute_ssid::<D, K1>(self.nonce, client_nonce);
         AuCPaceServerAugLayer::new(self.secret, ssid)
@@ -114,6 +128,16 @@ where
 
     /// Accept the user's username and generate the ClientInfo for the response.
     /// Moves the protocol into the CPace substep phase
+    ///
+    /// # Arguments:
+    /// - `username`: the client's username
+    /// - `database`: the password verifier database to retrieve the client's information from
+    ///
+    /// # Return:
+    /// (`next_step`, `message`)
+    /// - `next_step`: the server in the CPace substep stage
+    /// - `messsage`: the message to send to the client
+    ///
     pub fn generate_client_info<CSPRNG>(
         self,
         username: impl AsRef<[u8]>,
@@ -201,7 +225,19 @@ where
     }
 
     /// Generate a public key
-    /// moving the protocol onto the second half of the CPace substep - Receive Client Pubkey
+    /// moving the protocol onto the second half of the CPace substep - Receive Server Pubkey
+    ///
+    /// # Arguments:
+    /// - `channel_identifier` - `CI` from the protocol definition, in the context of TCP/IP this
+    ///     is usually some combination of the server and client's IP address and TCP port numbers.
+    ///     It's purpose is to prevent relay attacks.
+    /// - `rng` - the CSPRNG used when generating the public/private keypair
+    ///
+    /// # Return:
+    /// (`next_step`, `message`)
+    /// - `next_step`: the server waiting for the client's public key
+    /// - `message`: the message to send to the client
+    ///
     pub fn generate_public_key<CI: AsRef<[u8]>>(
         mut self,
         channel_identifier: CI,
@@ -237,8 +273,15 @@ where
         Self { ssid, priv_key }
     }
 
-    /// Generate a public key
-    /// moving the protocol onto the second half of the CPace substep - Receive Client Pubkey
+    /// Receive the client's public key
+    /// This completes the CPace substep and moves the client on to explicit mutual authentication.
+    ///
+    /// # Arguments:
+    /// - `client_pubkey` - the client's public key
+    ///
+    /// # Return:
+    /// `next_step`: the server in the Explicit Mutual Authentication phase
+    ///
     pub fn receive_client_pubkey(
         self,
         client_pubkey: RistrettoPoint,
@@ -246,6 +289,21 @@ where
         // TODO: verify the client pubkey here - how??
         let sk1 = compute_first_session_key::<D>(self.ssid, self.priv_key, client_pubkey);
         AuCPaceServerExpMutAuth::new(self.ssid, sk1)
+    }
+
+    /// Allow exiting the protocol early in the case of implicit authentication
+    /// Note: this should only be used in special circumstances and the
+    ///       explicit mutual authentication stage should be used in all other cases
+    ///
+    /// # Arguments:
+    /// - `client_pubkey` - the client's public key
+    ///
+    /// # Return:
+    /// `sk`: the session key reached by the AuCPace protocol
+    ///
+    pub fn implicit_auth(self, client_pubkey: RistrettoPoint) -> Output<D> {
+        let sk1 = compute_first_session_key::<D>(self.ssid, self.priv_key, client_pubkey);
+        compute_session_key::<D>(self.ssid, sk1)
     }
 }
 
@@ -266,6 +324,20 @@ where
         Self { ssid, sk1 }
     }
 
+    /// Receive the server's authenticator.
+    /// This completes the protocol and returns the derived key.
+    ///
+    /// # Arguments:
+    /// - `server_authenticator` - the server's authenticator
+    ///
+    /// # Return:
+    /// either:
+    /// - Ok((`sk`, `message`)):
+    ///     - `sk` - the session key reached by the AuCPace protocol
+    ///     - `message` - the message to send to the client
+    /// - Err(Error::MutualAuthFail): an error if the authenticator we computed doesn't match
+    ///     the client's authenticator, compared in constant time.
+    ///
     pub fn receive_client_authenticator(
         self,
         client_authenticator: [u8; 64],
@@ -307,165 +379,3 @@ where
     /// Explicit Mutual Authentication - the server's authenticator: `Ta`
     ExplicitMutualAuthentication(Output<D>),
 }
-
-//     /// Generate a nonce for ssid establishment
-//     ///
-//     /// # Return:
-//     /// `nonce` - a fresh ephemeral nonce for establishing an sub-session ID with the client
-//     pub fn generate_server_nonce(&mut self) -> [u8; K1] {
-//         generate_nonce(&mut self.rng)
-//     }
-//
-//     /// Computes the SSID from the server and client nonces
-//     ///
-//     /// # Arguments:
-//     /// - `s` - the server nonce
-//     /// - `t` - the client nonce
-//     ///
-//     /// # Return
-//     /// `hash`: the output of hashing the concatenation of these nonces
-//     ///         - `H0(s || t)`
-//     pub fn compute_ssid(&self, s: [u8; K1], t: [u8; K1]) -> Output<D> {
-//         compute_ssid::<D, K1>(s, t)
-//     }
-//
-//     /// Provides an implementation for the AuCPace Augmentation layer
-//     ///
-//     /// Arguments:
-//     /// - `database`: the object which acts as storage for the password verifiers
-//     /// - `username`: the username of the connecting client
-//     ///
-//     /// Return:
-//     /// `(PRS, client info)`
-//     ///
-//     /// where PRS is the Password Related String from the protocol definition
-//     /// and client info is all of the information the client needs for the next step of the protocol
-//     pub fn generate_client_info(
-//         &mut self,
-//         database: &mut impl Database<PasswordVerifier = RistrettoPoint>,
-//         username: impl AsRef<[u8]>,
-//     ) -> ([u8; 32], ClientInfo) {
-//         // for ristretto255 the cofactor is 1, for normal curve25519 it is 8
-//         // this will need to be provided by a group trait in the future
-//         let cofactor = Scalar::one();
-//         let x = Scalar::random(&mut self.rng) * cofactor;
-//         let x_pub = RISTRETTO_BASEPOINT_POINT * x;
-//
-//         if let Some((w, salt, sigma)) = database.lookup_verifier(username.as_ref()) {
-//             let prs = (w * x).compress().to_bytes();
-//             let client_info = ClientInfo {
-//                 // this will have to be provided by the trait in future
-//                 group: "ristretto255",
-//                 x_pub,
-//                 salt,
-//                 pbkdf_params: sigma,
-//             };
-//             (prs, client_info)
-//         } else {
-//             // generate a random PRS
-//             // TODO: would it be better to generate this via RistrettoPoint::random
-//             let mut prs = [0u8; 32];
-//             self.rng.fill_bytes(&mut prs);
-//
-//             // generate the salt from the hash of the server secret and the user's name
-//             let mut hasher: D = Default::default();
-//             hasher.update(self.secret.to_le_bytes());
-//             hasher.update(username);
-//             let hash = hasher.finalize();
-//             let hash_bytes: &[u8] = hash.as_ref();
-//
-//             // It is okay to expect here because SaltString has a buffer of 64 bytes by requirement
-//             // from the PHC spec. 48 bytes of data when encoded as base64 transform to 64 bytes.
-//             // This gives us the most entropy possible from the hash in the SaltString.
-//             let salt = SaltString::b64_encode(&hash_bytes[..48])
-//                 .expect("SaltString maximum length invariant broken");
-//
-//             let client_info = ClientInfo {
-//                 group: "ristretto255",
-//                 x_pub,
-//                 salt,
-//                 pbkdf_params: Default::default(),
-//             };
-//
-//             (prs, client_info)
-//         }
-//     }
-//
-//     /// Generate the diffie-hellman key pair for the CPace substep of the protocol
-//     ///
-//     /// Arguments:
-//     /// - `ssid`: sub-session identifier
-//     /// - `prs`: password related string
-//     /// - `ci`: channel identifier
-//     ///
-//     /// Returns:
-//     /// `(private key, public key)`
-//     ///
-//     /// `private key` is used to generate the shared key
-//     /// `public key` is sent to the client to allow them to compute the shared key
-//     pub fn generate_keypair(
-//         &mut self,
-//         ssid: Output<D>,
-//         prs: [u8; 32],
-//         ci: impl AsRef<[u8]>,
-//     ) -> (Scalar, RistrettoPoint) {
-//         generate_keypair::<D, CSPRNG>(&mut self.rng, ssid, prs, ci)
-//     }
-//
-//     /// Compute the first session key sk1 from the SSID, our private key and their public key
-//     ///
-//     /// # Arguments:
-//     /// - `ssid`: sub-session identifier
-//     /// - `prs`: password related string
-//     /// - `ci`: channel identifier
-//     ///
-//     /// # Return:
-//     /// `sk1` - the first session key
-//     pub fn compute_first_session_key(
-//         &self,
-//         ssid: Output<D>,
-//         priv_key: Scalar,
-//         pub_key: RistrettoPoint,
-//     ) -> Output<D> {
-//         compute_first_session_key::<D>(ssid, priv_key, pub_key)
-//     }
-//
-//     /// Compute the authenticator messages Ta and Tb
-//     ///
-//     /// # Arguments:
-//     /// - `ssid`: sub-session identifier
-//     /// - `prss`: sub-session identifier
-//     ///
-//     /// # Return:
-//     /// `(Ta, Tb)`
-//     /// where Ta is the authenticator message to be sent to the client
-//     /// and Tb is the value used to verify the authenticator message from the client
-//     pub fn compute_authenticator_messages(
-//         &self,
-//         ssid: Output<D>,
-//         first_session_key: Output<D>,
-//     ) -> (Output<D>, Output<D>) {
-//         compute_authenticator_messages::<D>(ssid, first_session_key)
-//     }
-//
-//     /// Checks whether the client authenticator is valid in **constant time**
-//     ///
-//     /// # Arguments:
-//     /// - `ta`: the client authenticator we computed
-//     /// - `client_ta`: the client authenticator sent by the client
-//     pub fn is_client_authenticator_valid(&self, ta: Output<D>, client_ta: &[u8; 64]) -> bool {
-//         ta.as_ref().ct_eq(client_ta).into()
-//     }
-//
-//     /// Compute the shared session key
-//     ///
-//     /// # Arguments:
-//     /// - `ssid`: the sub-session ID
-//     /// - `sk1`: the first session key
-//     ///
-//     /// # Return:
-//     /// `sk` - the final session key
-//     pub fn compute_session_key(&self, ssid: Output<D>, sk1: Output<D>) -> Output<D> {
-//         compute_session_key::<D>(ssid, sk1)
-//     }
-// }
