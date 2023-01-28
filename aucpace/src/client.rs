@@ -5,6 +5,8 @@ use crate::{
     errors::{Error, Result},
     utils::{compute_ssid, generate_keypair},
 };
+use core::marker::PhantomData;
+use curve25519_dalek::ristretto::CompressedRistretto;
 use curve25519_dalek::{
     digest::consts::U64,
     digest::{Digest, Output},
@@ -13,7 +15,6 @@ use curve25519_dalek::{
 };
 use password_hash::{PasswordHash, PasswordHasher, Salt};
 use rand_core::{CryptoRng, RngCore};
-use std::marker::PhantomData;
 use subtle::ConstantTimeEq;
 
 /// Implementation of the client side of the AuCPace protocol
@@ -54,7 +55,7 @@ where
     }
 }
 
-/// AuCPace Client in the SSID agreement phase
+/// Client in the SSID agreement phase
 pub struct AuCPaceClientSsidEstablish<D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
@@ -91,7 +92,7 @@ where
     }
 }
 
-/// AuCPace Client in the pre-augmentation phase
+/// Client in the pre-augmentation phase
 pub struct AuCPaceClientPreAug<D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
@@ -128,7 +129,7 @@ where
     }
 }
 
-/// AuCPace Client in the augmentation layer
+/// Client in the augmentation layer
 pub struct AuCPaceClientAugLayer<'a, D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
@@ -200,7 +201,7 @@ where
     }
 }
 
-/// AuCPace Client in the CPace substep
+/// Client in the CPace substep
 pub struct AuCPaceClientCPaceSubstep<D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
@@ -247,13 +248,13 @@ where
             generate_keypair::<D, CSPRNG, CI>(rng, self.ssid, self.prs, channel_identifier);
 
         let next_step = AuCPaceClientRecvServerKey::new(self.ssid, priv_key);
-        let message = ClientMessage::PublicKey(pub_key);
+        let message = ClientMessage::PublicKey(pub_key.compress());
 
         (next_step, message)
     }
 }
 
-/// AuCPace Client waiting to receive the server's public key
+/// Client waiting to receive the server's public key
 pub struct AuCPaceClientRecvServerKey<D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
@@ -312,7 +313,7 @@ where
     }
 }
 
-/// Server in the Explicit Mutual Authenticaton phase
+/// Client in the Explicit Mutual Authenticaton phase
 pub struct AuCPaceClientExpMutAuth<D, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
@@ -372,7 +373,7 @@ where
     Username(&'a [u8]),
 
     /// PublicKey - the client's public key: `Ya`
-    PublicKey(RistrettoPoint),
+    PublicKey(CompressedRistretto),
 
     /// Explicit Mutual Authentication - the client's authenticator: `Tb`
     ClientAuthenticator(Output<D>),

@@ -84,31 +84,24 @@
 //!
 //! [1]: https://eprint.iacr.org/2018/286.pdf
 
-mod client;
 mod database;
 mod errors;
-mod server;
 mod utils;
+
+/// Module containing the implementation of the client for the AuCPace protocol
+pub mod client;
+
+/// Module containing the implementation of the server for the AuCPace protocol
+pub mod server;
 
 #[rustfmt::skip]
 pub use self::{
     client::{
         AuCPaceClient,
-        AuCPaceClientSsidEstablish,
-        AuCPaceClientPreAug,
-        AuCPaceClientAugLayer,
-        AuCPaceClientCPaceSubstep,
-        AuCPaceClientRecvServerKey,
-        AuCPaceClientExpMutAuth,
         ClientMessage,
     },
     server::{
         AuCPaceServer,
-        AuCPaceServerSsidEstablish,
-        AuCPaceServerAugLayer,
-        AuCPaceServerCPaceSubstep,
-        AuCPaceServerRecvClientKey,
-        AuCPaceServerExpMutAuth,
         ServerMessage,
     },
     database::Database,
