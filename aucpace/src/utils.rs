@@ -130,3 +130,83 @@ where
     hasher.update(sk1);
     hasher.finalize()
 }
+
+// serde_with helper modules for serialising
+
+#[cfg(feature = "serde")]
+pub(crate) mod serde_saltstring {
+    use core::fmt;
+    use our_serde::de::{Error, Visitor};
+    use our_serde::{Deserializer, Serializer};
+    use password_hash::SaltString;
+
+    pub fn serialize<S>(data: &SaltString, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(data.as_str())
+    }
+
+    struct SaltStringVisitor {}
+
+    impl<'de> Visitor<'de> for SaltStringVisitor {
+        type Value = SaltString;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "a valid ASCII salt string")
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            SaltString::new(v).map_err(Error::custom)
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<SaltString, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(SaltStringVisitor {})
+    }
+}
+
+#[cfg(any(feature = "serde"))]
+pub(crate) mod serde_paramsstring {
+    use core::fmt;
+    use our_serde::de::{Error, Visitor};
+    use our_serde::{Deserializer, Serializer};
+    use password_hash::ParamsString;
+
+    pub fn serialize<S>(data: &ParamsString, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(data.as_str())
+    }
+
+    struct ParamsStringVisitor {}
+
+    impl<'de> Visitor<'de> for ParamsStringVisitor {
+        type Value = ParamsString;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "a valid PHC parameter string")
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            v.parse().map_err(Error::custom)
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<ParamsString, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(ParamsStringVisitor {})
+    }
+}

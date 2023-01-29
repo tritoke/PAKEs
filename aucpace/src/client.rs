@@ -386,8 +386,11 @@ where
 }
 
 /// An enum representing the different messages the client can send to the server
-#[cfg_attr(feature = "serialize", derive(serde::Serialize))]
-#[cfg_attr(feature = "deserialize", derive(serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    derive(our_serde::Serialize, our_serde::Deserialize)
+)]
+#[cfg_attr(feature = "serde", serde(crate = "our_serde"))]
 pub enum ClientMessage<'a, const K1: usize> {
     /// SSID establishment message - the client's nonce: `t`
     ClientNonce(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; K1]),

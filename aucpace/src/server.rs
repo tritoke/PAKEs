@@ -354,9 +354,15 @@ where
     }
 }
 
+#[cfg(feature = "serde")]
+use crate::utils::{serde_paramsstring, serde_saltstring};
+
 /// An enum representing the different messages the server can send to the client
-#[cfg_attr(feature = "serialize", derive(serde::Serialize))]
-#[cfg_attr(feature = "deserialize", derive(serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    derive(our_serde::Serialize, our_serde::Deserialize)
+)]
+#[cfg_attr(feature = "serde", serde(crate = "our_serde"))]
 pub enum ServerMessage<const K1: usize> {
     /// SSID establishment message - the server's nonce: `s`
     ServerNonce(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; K1]),
@@ -374,7 +380,7 @@ pub enum ServerMessage<const K1: usize> {
         salt: SaltString,
 
         /// the parameters for the PBKDF used - sigma from the protocol definition
-        #[cfg_attr(feature = "serde", serde(with = "serde_paramstring"))]
+        #[cfg_attr(feature = "serde", serde(with = "serde_paramsstring"))]
         pbkdf_params: ParamsString,
     },
 
@@ -383,85 +389,4 @@ pub enum ServerMessage<const K1: usize> {
 
     /// Explicit Mutual Authentication - the server's authenticator: `Ta`
     ServerAuthenticator(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; 64]),
-}
-
-#[cfg(any(feature = "serde"))]
-mod serde_saltstring {
-    use core::fmt;
-    use password_hash::SaltString;
-    use serde::de::{Error, Visitor};
-    use serde::{de, Deserializer, Serializer};
-
-    pub fn serialize<S, const N: usize>(data: &SaltString, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(data.as_str())
-    }
-
-    struct SaltStringVisitor {}
-
-    impl<'de> Visitor<'de> for SaltStringVisitor {
-        type Value = SaltString;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(formatter, "a valid salt string")
-        }
-
-        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: Error,
-        {
-            SaltString::new(v).map_err(Error::custom)
-        }
-    }
-
-    pub fn deserialize<'de, D, const N: usize>(deserializer: D) -> Result<SaltString, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(SaltStringVisitor {})
-    }
-}
-
-#[cfg(any(feature = "serde"))]
-mod serde_paramstring {
-    use core::fmt;
-    use password_hash::ParamsString;
-    use serde::de::{Error, Visitor};
-    use serde::{Deserializer, Serializer};
-
-    pub fn serialize<S, const N: usize>(
-        data: &ParamsString,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(data.as_str())
-    }
-
-    struct ParamsStringVisitor {}
-
-    impl<'de> Visitor<'de> for ParamsStringVisitor {
-        type Value = ParamsString;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(formatter, "a valid PHC parameter string")
-        }
-
-        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: Error,
-        {
-            v.parse().map_err(Error::custom)
-        }
-    }
-
-    pub fn deserialize<'de, D, const N: usize>(deserializer: D) -> Result<ParamsString, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(ParamsStringVisitor {})
-    }
 }
