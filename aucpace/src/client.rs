@@ -6,7 +6,6 @@ use crate::{
     utils::{compute_ssid, generate_keypair},
 };
 use core::marker::PhantomData;
-use curve25519_dalek::ristretto::CompressedRistretto;
 use curve25519_dalek::{
     digest::consts::U64,
     digest::{Digest, Output},
@@ -47,7 +46,7 @@ where
     /// - `next_step`: the client in the SSID establishment stage
     /// - `messsage`: the message to send to the server
     ///
-    pub fn begin(&mut self) -> (AuCPaceClientSsidEstablish<D, K1>, ClientMessage<'_, D, K1>) {
+    pub fn begin(&mut self) -> (AuCPaceClientSsidEstablish<D, K1>, ClientMessage<'_, K1>) {
         let next_step = AuCPaceClientSsidEstablish::new(&mut self.rng);
         let message = ClientMessage::ClientNonce(next_step.nonce);
 
@@ -121,7 +120,7 @@ where
     pub fn start_augmentation(
         self,
         username: &[u8],
-    ) -> (AuCPaceClientAugLayer<'_, D, K1>, ClientMessage<'_, D, K1>) {
+    ) -> (AuCPaceClientAugLayer<'_, D, K1>, ClientMessage<'_, K1>) {
         let next_step = AuCPaceClientAugLayer::new(self.ssid, username);
         let message = ClientMessage::Username(username);
 
@@ -238,7 +237,7 @@ where
         rng: &mut CSPRNG,
     ) -> (
         AuCPaceClientRecvServerKey<D, K1>,
-        ClientMessage<'static, D, K1>,
+        ClientMessage<'static, K1>,
     )
     where
         CI: AsRef<[u8]>,
@@ -248,7 +247,7 @@ where
             generate_keypair::<D, CSPRNG, CI>(rng, self.ssid, self.prs, channel_identifier);
 
         let next_step = AuCPaceClientRecvServerKey::new(self.ssid, priv_key);
-        let message = ClientMessage::PublicKey(pub_key.compress());
+        let message = ClientMessage::PublicKey(pub_key);
 
         (next_step, message)
     }
@@ -285,15 +284,16 @@ where
     pub fn receive_server_pubkey(
         self,
         server_pubkey: RistrettoPoint,
-    ) -> (
-        AuCPaceClientExpMutAuth<D, K1>,
-        ClientMessage<'static, D, K1>,
-    ) {
+    ) -> (AuCPaceClientExpMutAuth<D, K1>, ClientMessage<'static, K1>) {
         // TODO: verify the server pubkey here - how??
         let sk1 = compute_first_session_key::<D>(self.ssid, self.priv_key, server_pubkey);
-        let (ta, tb) = compute_authenticator_messages::<D>(self.ssid, sk1.clone());
+        let (ta, tb) = compute_authenticator_messages::<D>(self.ssid, sk1);
         let next_step = AuCPaceClientExpMutAuth::new(self.ssid, sk1, ta);
-        let message = ClientMessage::ClientAuthenticator(tb);
+        let message = ClientMessage::ClientAuthenticator(
+            tb.as_slice()
+                .try_into()
+                .expect("array length invariant broken"),
+        );
         (next_step, message)
     }
 
@@ -361,24 +361,6 @@ where
     }
 }
 
-/// An enum representing the different messages the client can send to the server
-pub enum ClientMessage<'a, D, const K1: usize>
-where
-    D: Digest<OutputSize = U64> + Default,
-{
-    /// SSID establishment message - the client's nonce: `t`
-    ClientNonce([u8; K1]),
-
-    /// Username - the client's username
-    Username(&'a [u8]),
-
-    /// PublicKey - the client's public key: `Ya`
-    PublicKey(CompressedRistretto),
-
-    /// Explicit Mutual Authentication - the client's authenticator: `Tb`
-    ClientAuthenticator(Output<D>),
-}
-
 /// Hash a username and password with the given password hasher
 fn hash_password<'a, H>(
     username: impl AsRef<[u8]>,
@@ -401,4 +383,21 @@ where
     hasher
         .hash_password_customized(v.as_slice(), None, None, params, salt)
         .map_err(Error::PasswordHashing)
+}
+
+/// An enum representing the different messages the client can send to the server
+#[cfg_attr(feature = "serialize", derive(serde::Serialize))]
+#[cfg_attr(feature = "deserialize", derive(serde::Deserialize))]
+pub enum ClientMessage<'a, const K1: usize> {
+    /// SSID establishment message - the client's nonce: `t`
+    ClientNonce(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; K1]),
+
+    /// Username - the client's username
+    Username(&'a [u8]),
+
+    /// PublicKey - the client's public key: `Ya`
+    PublicKey(RistrettoPoint),
+
+    /// Explicit Mutual Authentication - the client's authenticator: `Tb`
+    ClientAuthenticator(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; 64]),
 }

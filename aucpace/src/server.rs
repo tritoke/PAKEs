@@ -4,6 +4,7 @@ use crate::utils::{
     generate_keypair, generate_nonce,
 };
 use crate::{Error, Result};
+use core::marker::PhantomData;
 use curve25519_dalek::{
     constants::RISTRETTO_BASEPOINT_POINT,
     digest::consts::U64,
@@ -13,7 +14,6 @@ use curve25519_dalek::{
 };
 use password_hash::{ParamsString, SaltString};
 use rand_core::{CryptoRng, RngCore};
-use std::marker::PhantomData;
 use subtle::ConstantTimeEq;
 
 /// A non-copy wrapper around u64
@@ -63,9 +63,9 @@ where
     /// - `next_step`: the server in the SSID establishment stage
     /// - `messsage`: the message to send to the server
     ///
-    pub fn begin(&mut self) -> (AuCPaceServerSsidEstablish<D, K1>, ServerMessage<D, K1>) {
+    pub fn begin(&mut self) -> (AuCPaceServerSsidEstablish<D, K1>, ServerMessage<K1>) {
         let next_step = AuCPaceServerSsidEstablish::new(self.secret.clone(), &mut self.rng);
-        let message = ServerMessage::SsidEstablish(next_step.nonce);
+        let message = ServerMessage::ServerNonce(next_step.nonce);
         (next_step, message)
     }
 }
@@ -143,10 +143,7 @@ where
         username: impl AsRef<[u8]>,
         database: &mut impl Database<PasswordVerifier = RistrettoPoint>,
         mut rng: CSPRNG,
-    ) -> (
-        AuCPaceServerCPaceSubstep<D, CSPRNG, K1>,
-        ServerMessage<D, K1>,
-    )
+    ) -> (AuCPaceServerCPaceSubstep<D, CSPRNG, K1>, ServerMessage<K1>)
     where
         CSPRNG: RngCore + CryptoRng,
     {
@@ -161,7 +158,7 @@ where
         let message;
         if let Some((w, salt, sigma)) = database.lookup_verifier(username.as_ref()) {
             prs = (w * x).compress().to_bytes();
-            message = ServerMessage::AugmentationLayer {
+            message = ServerMessage::AugmentationInfo {
                 // this will have to be provided by the trait in future
                 group: "ristretto255",
                 x_pub,
@@ -190,7 +187,7 @@ where
             let salt = SaltString::b64_encode(&hash_bytes[..48])
                 .expect("SaltString maximum length invariant broken");
 
-            message = ServerMessage::AugmentationLayer {
+            message = ServerMessage::AugmentationInfo {
                 group: "ristretto255",
                 x_pub,
                 salt,
@@ -241,7 +238,7 @@ where
     pub fn generate_public_key<CI: AsRef<[u8]>>(
         mut self,
         channel_identifier: CI,
-    ) -> (AuCPaceServerRecvClientKey<D, K1>, ServerMessage<D, K1>) {
+    ) -> (AuCPaceServerRecvClientKey<D, K1>, ServerMessage<K1>) {
         let (priv_key, pub_key) = generate_keypair::<D, CSPRNG, CI>(
             &mut self.rng,
             self.ssid,
@@ -250,7 +247,7 @@ where
         );
 
         let next_step = AuCPaceServerRecvClientKey::new(self.ssid, priv_key);
-        let message = ServerMessage::CPaceSubstep(pub_key);
+        let message = ServerMessage::PublicKey(pub_key);
 
         (next_step, message)
     }
@@ -341,11 +338,15 @@ where
     pub fn receive_client_authenticator(
         self,
         client_authenticator: [u8; 64],
-    ) -> Result<(Output<D>, ServerMessage<D, K1>)> {
+    ) -> Result<(Output<D>, ServerMessage<K1>)> {
         let (ta, tb) = compute_authenticator_messages::<D>(self.ssid, self.sk1);
         if tb.as_ref().ct_eq(&client_authenticator).into() {
             let sk = compute_session_key::<D>(self.ssid, self.sk1);
-            let message = ServerMessage::ExplicitMutualAuthentication(ta);
+            let message = ServerMessage::ServerAuthenticator(
+                ta.as_slice()
+                    .try_into()
+                    .expect("array length invariant broken"),
+            );
             Ok((sk, message))
         } else {
             Err(Error::MutualAuthFail)
@@ -354,28 +355,113 @@ where
 }
 
 /// An enum representing the different messages the server can send to the client
-pub enum ServerMessage<D, const K1: usize>
-where
-    D: Digest<OutputSize = U64> + Default,
-{
+#[cfg_attr(feature = "serialize", derive(serde::Serialize))]
+#[cfg_attr(feature = "deserialize", derive(serde::Deserialize))]
+pub enum ServerMessage<const K1: usize> {
     /// SSID establishment message - the server's nonce: `s`
-    SsidEstablish([u8; K1]),
+    ServerNonce(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; K1]),
 
     /// Information required for the AuCPace Augmentation layer sub-step
-    AugmentationLayer {
+    AugmentationInfo {
         /// J from the protocol definition
         group: &'static str,
+
         /// X from the protocol definition
         x_pub: RistrettoPoint,
+
         /// the salt used with the PBKDF
+        #[cfg_attr(feature = "serde", serde(with = "serde_saltstring"))]
         salt: SaltString,
+
         /// the parameters for the PBKDF used - sigma from the protocol definition
+        #[cfg_attr(feature = "serde", serde(with = "serde_paramstring"))]
         pbkdf_params: ParamsString,
     },
 
     /// CPace substep message - the server's public key: `Ya`
-    CPaceSubstep(RistrettoPoint),
+    PublicKey(RistrettoPoint),
 
     /// Explicit Mutual Authentication - the server's authenticator: `Ta`
-    ExplicitMutualAuthentication(Output<D>),
+    ServerAuthenticator(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; 64]),
+}
+
+#[cfg(any(feature = "serde"))]
+mod serde_saltstring {
+    use core::fmt;
+    use password_hash::SaltString;
+    use serde::de::{Error, Visitor};
+    use serde::{de, Deserializer, Serializer};
+
+    pub fn serialize<S, const N: usize>(data: &SaltString, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(data.as_str())
+    }
+
+    struct SaltStringVisitor {}
+
+    impl<'de> Visitor<'de> for SaltStringVisitor {
+        type Value = SaltString;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "a valid salt string")
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            SaltString::new(v).map_err(Error::custom)
+        }
+    }
+
+    pub fn deserialize<'de, D, const N: usize>(deserializer: D) -> Result<SaltString, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(SaltStringVisitor {})
+    }
+}
+
+#[cfg(any(feature = "serde"))]
+mod serde_paramstring {
+    use core::fmt;
+    use password_hash::ParamsString;
+    use serde::de::{Error, Visitor};
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S, const N: usize>(
+        data: &ParamsString,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(data.as_str())
+    }
+
+    struct ParamsStringVisitor {}
+
+    impl<'de> Visitor<'de> for ParamsStringVisitor {
+        type Value = ParamsString;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "a valid PHC parameter string")
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: Error,
+        {
+            v.parse().map_err(Error::custom)
+        }
+    }
+
+    pub fn deserialize<'de, D, const N: usize>(deserializer: D) -> Result<ParamsString, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(ParamsStringVisitor {})
+    }
 }
