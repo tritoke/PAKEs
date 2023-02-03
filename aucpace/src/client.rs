@@ -1,18 +1,20 @@
 use crate::utils::{
     compute_authenticator_messages, compute_first_session_key, compute_session_key, generate_nonce,
+    scalar_from_hash,
 };
 use crate::{
     errors::{Error, Result},
-    utils::{compute_ssid, generate_keypair},
+    utils::{compute_ssid, generate_keypair, serde_paramsstring, serde_saltstring},
 };
 use core::marker::PhantomData;
+use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
 use curve25519_dalek::{
     digest::consts::U64,
     digest::{Digest, Output},
     ristretto::RistrettoPoint,
     scalar::Scalar,
 };
-use password_hash::{PasswordHash, PasswordHasher, Salt};
+use password_hash::{ParamsString, PasswordHash, PasswordHasher, Salt, SaltString};
 use rand_core::{CryptoRng, RngCore};
 use subtle::ConstantTimeEq;
 
@@ -51,6 +53,45 @@ where
         let message = ClientMessage::ClientNonce(next_step.nonce);
 
         (next_step, message)
+    }
+
+    /// Register a username/password
+    ///
+    /// # Return:
+    /// (`next_step`, `message`)
+    /// - `next_step`: the client in the SSID establishment stage
+    /// - `messsage`: the message to send to the server
+    ///
+    pub fn register<'a, H>(
+        &mut self,
+        username: &'a [u8],
+        password: impl AsRef<[u8]>,
+        params: H::Params,
+        hasher: H,
+    ) -> Result<ClientMessage<'a, K1>>
+    where
+        H: PasswordHasher,
+    {
+        // adapted from SaltString::generate, which we cannot use due to curve25519 versions of rand_core
+        let mut salt = [0u8; Salt::RECOMMENDED_LENGTH];
+        self.rng.fill_bytes(&mut salt);
+        let salt_string = SaltString::b64_encode(&salt).expect("Salt length invariant broken.");
+
+        // compute the verifier W
+        let pw_hash = hash_password(username, password, &salt_string, params.clone(), hasher)?;
+        let cofactor = Scalar::one();
+        let w = scalar_from_hash(pw_hash)?;
+        let verifier = RISTRETTO_BASEPOINT_POINT * (w * cofactor);
+
+        // attempt to convert the parameters to a ParamsString
+        let params_string = params.try_into().map_err(Error::PasswordHashing)?;
+
+        Ok(ClientMessage::Registration {
+            username,
+            salt: salt_string,
+            params: params_string,
+            verifier,
+        })
     }
 }
 
@@ -174,25 +215,7 @@ where
     {
         let cofactor = Scalar::one();
         let pw_hash = hash_password(self.username, password, salt, params, hasher)?;
-        let hash = pw_hash.hash.ok_or(Error::HashEmpty)?;
-        let hash_bytes = hash.as_bytes();
-
-        // support both 32 and 64 byte hashes
-        let w = match hash_bytes.len() {
-            32 => {
-                let arr = hash_bytes
-                    .try_into()
-                    .expect("slice length invariant broken");
-                Scalar::from_bytes_mod_order(arr)
-            }
-            64 => {
-                let arr = hash_bytes
-                    .try_into()
-                    .expect("slice length invariant broken");
-                Scalar::from_bytes_mod_order_wide(arr)
-            }
-            _ => return Err(Error::HashSizeInvalid),
-        };
+        let w = scalar_from_hash(pw_hash)?;
 
         let prs = (x_pub * (w * cofactor)).compress().to_bytes();
 
@@ -350,7 +373,6 @@ where
     pub fn receive_server_authenticator(self, server_authenticator: [u8; 64]) -> Result<Output<D>> {
         if self
             .server_authenticator
-            .as_ref()
             .ct_eq(&server_authenticator)
             .into()
         {
@@ -391,6 +413,7 @@ where
     derive(our_serde::Serialize, our_serde::Deserialize)
 )]
 #[cfg_attr(feature = "serde", serde(crate = "our_serde"))]
+#[derive(Debug)]
 pub enum ClientMessage<'a, const K1: usize> {
     /// SSID establishment message - the client's nonce: `t`
     ClientNonce(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; K1]),
@@ -403,4 +426,15 @@ pub enum ClientMessage<'a, const K1: usize> {
 
     /// Explicit Mutual Authentication - the client's authenticator: `Tb`
     ClientAuthenticator(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; 64]),
+
+    /// Registration - the username, verifier, salt and parameters needed for registering a user
+    /// NOTE: if the UAD field is desired this should be handled separately and sent at the same time
+    Registration {
+        username: &'a [u8],
+        #[cfg_attr(feature = "serde", serde(with = "serde_saltstring"))]
+        salt: SaltString,
+        #[cfg_attr(feature = "serde", serde(with = "serde_paramsstring"))]
+        params: ParamsString,
+        verifier: RistrettoPoint,
+    },
 }

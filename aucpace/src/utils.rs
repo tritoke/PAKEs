@@ -1,9 +1,11 @@
+use crate::{Error, Result};
 use curve25519_dalek::{
     digest::consts::U64,
     digest::{Digest, Output},
     ristretto::RistrettoPoint,
     scalar::Scalar,
 };
+use password_hash::PasswordHash;
 use rand_core::{CryptoRng, RngCore};
 
 #[allow(non_snake_case)]
@@ -129,6 +131,29 @@ where
     hasher.update(ssid);
     hasher.update(sk1);
     hasher.finalize()
+}
+
+/// Compute a scalar from a password hash
+pub(crate) fn scalar_from_hash(pw_hash: PasswordHash) -> Result<Scalar> {
+    let hash = pw_hash.hash.ok_or(Error::HashEmpty)?;
+    let hash_bytes = hash.as_bytes();
+
+    // support both 32 and 64 byte hashes
+    match hash_bytes.len() {
+        32 => {
+            let arr = hash_bytes
+                .try_into()
+                .expect("slice length invariant broken");
+            Ok(Scalar::from_bytes_mod_order(arr))
+        }
+        64 => {
+            let arr = hash_bytes
+                .try_into()
+                .expect("slice length invariant broken");
+            Ok(Scalar::from_bytes_mod_order_wide(arr))
+        }
+        _ => Err(Error::HashSizeInvalid),
+    }
 }
 
 // serde_with helper modules for serialising

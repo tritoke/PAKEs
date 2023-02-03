@@ -4,7 +4,7 @@ use core::fmt;
 #[non_exhaustive]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Error {
-    /// Error while performing a password hash
+    /// Wrapper around `password_hash`'s error type, for propagating errors should they occur
     PasswordHashing(password_hash::Error),
     /// PasswordHasher produced an empty hash.
     HashEmpty,

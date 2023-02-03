@@ -63,7 +63,12 @@ where
     /// - `next_step`: the server in the SSID establishment stage
     /// - `messsage`: the message to send to the server
     ///
-    pub fn begin(&mut self) -> (AuCPaceServerSsidEstablish<D, K1>, ServerMessage<K1>) {
+    pub fn begin(
+        &mut self,
+    ) -> (
+        AuCPaceServerSsidEstablish<D, K1>,
+        ServerMessage<'static, K1>,
+    ) {
         let next_step = AuCPaceServerSsidEstablish::new(self.secret.clone(), &mut self.rng);
         let message = ServerMessage::ServerNonce(next_step.nonce);
         (next_step, message)
@@ -141,9 +146,12 @@ where
     pub fn generate_client_info<CSPRNG>(
         self,
         username: impl AsRef<[u8]>,
-        database: &mut impl Database<PasswordVerifier = RistrettoPoint>,
+        database: &impl Database<PasswordVerifier = RistrettoPoint>,
         mut rng: CSPRNG,
-    ) -> (AuCPaceServerCPaceSubstep<D, CSPRNG, K1>, ServerMessage<K1>)
+    ) -> (
+        AuCPaceServerCPaceSubstep<D, CSPRNG, K1>,
+        ServerMessage<'static, K1>,
+    )
     where
         CSPRNG: RngCore + CryptoRng,
     {
@@ -238,7 +246,10 @@ where
     pub fn generate_public_key<CI: AsRef<[u8]>>(
         mut self,
         channel_identifier: CI,
-    ) -> (AuCPaceServerRecvClientKey<D, K1>, ServerMessage<K1>) {
+    ) -> (
+        AuCPaceServerRecvClientKey<D, K1>,
+        ServerMessage<'static, K1>,
+    ) {
         let (priv_key, pub_key) = generate_keypair::<D, CSPRNG, CI>(
             &mut self.rng,
             self.ssid,
@@ -338,9 +349,9 @@ where
     pub fn receive_client_authenticator(
         self,
         client_authenticator: [u8; 64],
-    ) -> Result<(Output<D>, ServerMessage<K1>)> {
+    ) -> Result<(Output<D>, ServerMessage<'static, K1>)> {
         let (ta, tb) = compute_authenticator_messages::<D>(self.ssid, self.sk1);
-        if tb.as_ref().ct_eq(&client_authenticator).into() {
+        if tb.ct_eq(&client_authenticator).into() {
             let sk = compute_session_key::<D>(self.ssid, self.sk1);
             let message = ServerMessage::ServerAuthenticator(
                 ta.as_slice()
@@ -363,14 +374,15 @@ use crate::utils::{serde_paramsstring, serde_saltstring};
     derive(our_serde::Serialize, our_serde::Deserialize)
 )]
 #[cfg_attr(feature = "serde", serde(crate = "our_serde"))]
-pub enum ServerMessage<const K1: usize> {
+#[derive(Debug)]
+pub enum ServerMessage<'a, const K1: usize> {
     /// SSID establishment message - the server's nonce: `s`
     ServerNonce(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; K1]),
 
     /// Information required for the AuCPace Augmentation layer sub-step
     AugmentationInfo {
         /// J from the protocol definition
-        group: &'static str,
+        group: &'a str,
 
         /// X from the protocol definition
         x_pub: RistrettoPoint,
