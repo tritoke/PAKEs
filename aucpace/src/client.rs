@@ -430,11 +430,18 @@ pub enum ClientMessage<'a, const K1: usize> {
     /// Registration - the username, verifier, salt and parameters needed for registering a user
     /// NOTE: if the UAD field is desired this should be handled separately and sent at the same time
     Registration {
+        /// The username of whoever is registering
         username: &'a [u8],
+
+        /// The salt used when computing the verifier
         #[cfg_attr(feature = "serde", serde(with = "serde_saltstring"))]
         salt: SaltString,
+
+        /// The password hasher's parameters used when computing the verifier
         #[cfg_attr(feature = "serde", serde(with = "serde_paramsstring"))]
         params: ParamsString,
+
+        /// The verifier computer from the user's password
         verifier: RistrettoPoint,
     },
 }

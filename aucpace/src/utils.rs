@@ -134,7 +134,7 @@ where
 }
 
 /// Compute a scalar from a password hash
-pub(crate) fn scalar_from_hash(pw_hash: PasswordHash) -> Result<Scalar> {
+pub(crate) fn scalar_from_hash(pw_hash: PasswordHash<'_>) -> Result<Scalar> {
     let hash = pw_hash.hash.ok_or(Error::HashEmpty)?;
     let hash_bytes = hash.as_bytes();
 
