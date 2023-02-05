@@ -47,6 +47,7 @@ fn main() -> Result<()> {
 
         // ===== SSID Establishment =====
         let (server, message) = base_server.begin();
+        println!("[server] Sending message: ServerNonce");
         stream
             .write_all(&bincode::serialize(&message).unwrap())
             .unwrap();
@@ -71,6 +72,7 @@ fn main() -> Result<()> {
         } else {
             panic!("Received invalid client message {:?}", client_message);
         };
+        println!("[server] Sending message: AugmentationInfo");
         stream
             .write_all(&bincode::serialize(&message).unwrap())
             .unwrap();
@@ -78,6 +80,7 @@ fn main() -> Result<()> {
         // ===== CPace substep =====
         let ci = TcpChannelIdentifier::new(client_addr, server_socket).unwrap();
         let (server, message) = server.generate_public_key(ci);
+        println!("[server] Sending message: PublicKey");
         stream
             .write_all(&bincode::serialize(&message).unwrap())
             .unwrap();
@@ -99,6 +102,7 @@ fn main() -> Result<()> {
 
         if let ClientMessage::ClientAuthenticator(client_authenticator) = client_message {
             let (key, message) = server.receive_client_authenticator(client_authenticator)?;
+            println!("[server] Sending message: ServerAuthenticator");
             stream
                 .write_all(&bincode::serialize(&message).unwrap())
                 .unwrap();
@@ -119,6 +123,7 @@ fn main() -> Result<()> {
 
         // ===== SSID ESTABLISHMENT =====
         let (client, message) = base_client.begin();
+        println!("[client] Sending message: ClientNonce");
         stream
             .write_all(&bincode::serialize(&message).unwrap())
             .unwrap();
@@ -135,6 +140,7 @@ fn main() -> Result<()> {
 
         // ===== Augmentation Layer =====
         let (client, message) = client.start_augmentation(USERNAME);
+        println!("[client] Sending message: Username");
         stream
             .write_all(&bincode::serialize(&message).unwrap())
             .unwrap();
@@ -166,6 +172,7 @@ fn main() -> Result<()> {
         // ===== CPace substep =====
         let ci = TcpChannelIdentifier::new(stream.local_addr().unwrap(), server_socket).unwrap();
         let (client, message) = client.generate_public_key(ci, &mut OsRng);
+        println!("[client] Sending message: PublicKey");
         stream
             .write_all(&bincode::serialize(&message).unwrap())
             .unwrap();
@@ -180,6 +187,7 @@ fn main() -> Result<()> {
         };
 
         // ===== Explicit Mutual Auth =====
+        println!("[client] Sending message: ClientAuthenticator");
         stream
             .write_all(&bincode::serialize(&message).unwrap())
             .unwrap();

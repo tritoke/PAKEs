@@ -427,7 +427,7 @@ where
     buf[u + 1..u + p + 1].copy_from_slice(pass);
 
     hasher
-        .hash_password_customized(&buf, None, None, params, salt)
+        .hash_password_customized(&buf[0..u + p + 1], None, None, params, salt)
         .map_err(Error::PasswordHashing)
 }
 
