@@ -105,3 +105,11 @@ pub use self::{
     database::Database,
     errors::{ Error, Result },
 };
+
+/// Default Server instantiation with SHA512, OsRng and a nonce size of 16 bytes
+#[cfg(feature = "default")]
+pub type Server = AuCPaceServer<sha2::Sha512, rand_core::OsRng, 16>;
+
+/// Default Client instantiation with SHA512, Scrypt, OsRng and a nonce size of 16 bytes
+#[cfg(feature = "default")]
+pub type Client = AuCPaceClient<sha2::Sha512, scrypt::Scrypt, rand_core::OsRng, 16>;

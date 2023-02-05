@@ -26,18 +26,21 @@ use subtle::ConstantTimeEq;
 extern crate alloc;
 
 /// Implementation of the client side of the AuCPace protocol
-pub struct AuCPaceClient<D, CSPRNG, const K1: usize>
+pub struct AuCPaceClient<D, H, CSPRNG, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
+    H: PasswordHasher,
     CSPRNG: RngCore + CryptoRng,
 {
     rng: CSPRNG,
     d: PhantomData<D>,
+    h: PhantomData<H>,
 }
 
-impl<D, CSPRNG, const K1: usize> AuCPaceClient<D, CSPRNG, K1>
+impl<D, H, CSPRNG, const K1: usize> AuCPaceClient<D, H, CSPRNG, K1>
 where
     D: Digest<OutputSize = U64> + Default,
+    H: PasswordHasher,
     CSPRNG: RngCore + CryptoRng,
 {
     /// Create new server
@@ -45,6 +48,7 @@ where
         Self {
             rng,
             d: Default::default(),
+            h: Default::default(),
         }
     }
 
@@ -55,7 +59,7 @@ where
     /// - `next_step`: the client in the SSID establishment stage
     /// - `messsage`: the message to send to the server
     ///
-    pub fn begin(&mut self) -> (AuCPaceClientSsidEstablish<D, K1>, ClientMessage<'_, K1>) {
+    pub fn begin(&mut self) -> (AuCPaceClientSsidEstablish<D, H, K1>, ClientMessage<'_, K1>) {
         let next_step = AuCPaceClientSsidEstablish::new(&mut self.rng);
         let message = ClientMessage::ClientNonce(next_step.nonce);
 
@@ -64,12 +68,23 @@ where
 
     /// Register a username/password
     ///
+    /// # Arguments:
+    /// - `username` - the username to register with
+    /// - `password` - the password for the user
+    /// - `params` - the parameters of the PBKDF used
+    /// - `hasher` - the hasher to use for hashing the username and password.
+    ///
+    /// # Const Parameters
+    /// - `BUFSIZ` - the size of the buffer to use while hashing
+    ///   it should be enough to store the maximum length of a username + password + 1 for your use case
+    ///   e.g. if you have a username limit of 20 and password limit of 60, 81 would be the right value.
+    ///
     /// # Return:
     /// (`next_step`, `message`)
     /// - `next_step`: the client in the SSID establishment stage
     /// - `messsage`: the message to send to the server
     ///
-    pub fn register<'a, P, H>(
+    pub fn register<'a, P, const BUFSIZ: usize>(
         &mut self,
         username: &'a [u8],
         password: P,
@@ -78,7 +93,6 @@ where
     ) -> Result<ClientMessage<'a, K1>>
     where
         P: AsRef<[u8]>,
-        H: PasswordHasher,
     {
         // adapted from SaltString::generate, which we cannot use due to curve25519 versions of rand_core
         let mut salt = [0u8; Salt::RECOMMENDED_LENGTH];
@@ -86,7 +100,62 @@ where
         let salt_string = SaltString::b64_encode(&salt).expect("Salt length invariant broken.");
 
         // compute the verifier W
-        let pw_hash = hash_password(username, password, &salt_string, params.clone(), hasher)?;
+        let pw_hash = hash_password::<&[u8], P, &SaltString, H, BUFSIZ>(
+            username,
+            password,
+            &salt_string,
+            params.clone(),
+            hasher,
+        )?;
+        let cofactor = Scalar::one();
+        let w = scalar_from_hash(pw_hash)?;
+        let verifier = RISTRETTO_BASEPOINT_POINT * (w * cofactor);
+
+        // attempt to convert the parameters to a ParamsString
+        let params_string = params.try_into().map_err(Error::PasswordHashing)?;
+
+        Ok(ClientMessage::Registration {
+            username,
+            salt: salt_string,
+            params: params_string,
+            verifier,
+        })
+    }
+
+    /// Register a username/password
+    ///
+    /// Allocates space for user:pass string on the heap, instead of a constant size buffer.
+    ///
+    /// # Arguments:
+    /// - `username` - the username to register with
+    /// - `password` - the password for the user
+    /// - `params` - the parameters of the PBKDF used
+    /// - `hasher` - the hasher to use for hashing the username and password.
+    ///
+    /// # Return:
+    /// (`next_step`, `message`)
+    /// - `next_step`: the client in the SSID establishment stage
+    /// - `messsage`: the message to send to the server
+    ///
+    #[cfg(feature = "alloc")]
+    pub fn register_alloc<'a, P>(
+        &mut self,
+        username: &'a [u8],
+        password: P,
+        params: H::Params,
+        hasher: H,
+    ) -> Result<ClientMessage<'a, K1>>
+    where
+        P: AsRef<[u8]>,
+    {
+        // adapted from SaltString::generate, which we cannot use due to curve25519 versions of rand_core
+        let mut salt = [0u8; Salt::RECOMMENDED_LENGTH];
+        self.rng.fill_bytes(&mut salt);
+        let salt_string = SaltString::b64_encode(&salt).expect("Salt length invariant broken.");
+
+        // compute the verifier W
+        let pw_hash =
+            hash_password_alloc(username, password, &salt_string, params.clone(), hasher)?;
         let cofactor = Scalar::one();
         let w = scalar_from_hash(pw_hash)?;
         let verifier = RISTRETTO_BASEPOINT_POINT * (w * cofactor);
@@ -104,17 +173,20 @@ where
 }
 
 /// Client in the SSID agreement phase
-pub struct AuCPaceClientSsidEstablish<D, const K1: usize>
+pub struct AuCPaceClientSsidEstablish<D, H, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
+    H: PasswordHasher,
 {
     nonce: [u8; K1],
     d: PhantomData<D>,
+    h: PhantomData<H>,
 }
 
-impl<D, const K1: usize> AuCPaceClientSsidEstablish<D, K1>
+impl<D, H, const K1: usize> AuCPaceClientSsidEstablish<D, H, K1>
 where
     D: Digest<OutputSize = U64> + Default,
+    H: PasswordHasher,
 {
     fn new<CSPRNG>(rng: &mut CSPRNG) -> Self
     where
@@ -123,6 +195,7 @@ where
         Self {
             nonce: generate_nonce(rng),
             d: Default::default(),
+            h: Default::default(),
         }
     }
 
@@ -134,26 +207,32 @@ where
     /// # return:
     /// `next_step`: the client in the pre-augmentation stage
     ///
-    pub fn agree_ssid(self, server_nonce: [u8; K1]) -> AuCPaceClientPreAug<D, K1> {
+    pub fn agree_ssid(self, server_nonce: [u8; K1]) -> AuCPaceClientPreAug<D, H, K1> {
         let ssid = compute_ssid::<D, K1>(server_nonce, self.nonce);
         AuCPaceClientPreAug::new(ssid)
     }
 }
 
 /// Client in the pre-augmentation phase
-pub struct AuCPaceClientPreAug<D, const K1: usize>
+pub struct AuCPaceClientPreAug<D, H, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
+    H: PasswordHasher,
 {
     ssid: Output<D>,
+    h: PhantomData<H>,
 }
 
-impl<D, const K1: usize> AuCPaceClientPreAug<D, K1>
+impl<D, H, const K1: usize> AuCPaceClientPreAug<D, H, K1>
 where
     D: Digest<OutputSize = U64> + Default,
+    H: PasswordHasher,
 {
     fn new(ssid: Output<D>) -> Self {
-        Self { ssid }
+        Self {
+            ssid,
+            h: Default::default(),
+        }
     }
 
     /// Consume the client's username and begin the augmentation layer
@@ -169,7 +248,7 @@ where
     pub fn start_augmentation(
         self,
         username: &[u8],
-    ) -> (AuCPaceClientAugLayer<'_, D, K1>, ClientMessage<'_, K1>) {
+    ) -> (AuCPaceClientAugLayer<'_, D, H, K1>, ClientMessage<'_, K1>) {
         let next_step = AuCPaceClientAugLayer::new(self.ssid, username);
         let message = ClientMessage::Username(username);
 
@@ -178,24 +257,80 @@ where
 }
 
 /// Client in the augmentation layer
-pub struct AuCPaceClientAugLayer<'a, D, const K1: usize>
+pub struct AuCPaceClientAugLayer<'a, D, H, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
+    H: PasswordHasher,
 {
     ssid: Output<D>,
     username: &'a [u8],
+    h: PhantomData<H>,
 }
 
-impl<'a, D, const K1: usize> AuCPaceClientAugLayer<'a, D, K1>
+impl<'a, D, H, const K1: usize> AuCPaceClientAugLayer<'a, D, H, K1>
 where
     D: Digest<OutputSize = U64> + Default,
+    H: PasswordHasher,
 {
     fn new(ssid: Output<D>, username: &'a [u8]) -> Self {
-        Self { ssid, username }
+        Self {
+            ssid,
+            username,
+            h: Default::default(),
+        }
     }
 
     /// Process the augmentation layer information from the server, hashes the user's password
     /// together with their username, then computes `w` and `PRS`.
+    ///
+    /// # Arguments:
+    /// - `x_pub` - `x` from the protocol definition, used in generating the password related string (prs)
+    /// - `password` - the user's password
+    /// - `salt` - the salt value sent by the server
+    /// - `params` - the parameters used by the hasher
+    /// - `hasher` - the hasher to use when computing `w`
+    ///
+    /// # Const Parameters
+    /// - `BUFSIZ` - the size of the buffer to use while hashing
+    ///   it should be enough to store the maximum length of a username + password + 1 for your use case
+    ///   e.g. if you have a username limit of 20 and password limit of 60, 81 would be the right value.
+    ///
+    /// This version requires the alloc feature and allocates space for
+    /// the username and password on the heap using Vec.
+    ///
+    /// # Return:
+    /// either
+    /// - ok(`next_step`): the client in the cpace substep
+    /// - err(error::passwordhashing(hasher_error) | error::hashempty | error::hashsizeinvalid):
+    ///     one of the three error variants that can result from the password hashing process
+    ///
+    pub fn generate_cpace<'salt, P, S, const BUFSIZ: usize>(
+        self,
+        x_pub: RistrettoPoint,
+        password: P,
+        salt: S,
+        params: H::Params,
+        hasher: H,
+    ) -> Result<AuCPaceClientCPaceSubstep<D, K1>>
+    where
+        P: AsRef<[u8]>,
+        S: Into<Salt<'a>>,
+    {
+        let cofactor = Scalar::one();
+        let pw_hash =
+            hash_password::<&[u8], P, S, H, BUFSIZ>(self.username, password, salt, params, hasher)?;
+        let w = scalar_from_hash(pw_hash)?;
+
+        let prs = (x_pub * (w * cofactor)).compress().to_bytes();
+
+        Ok(AuCPaceClientCPaceSubstep::new(self.ssid, prs))
+    }
+
+    /// Process the augmentation layer information from the server, hashes the user's password
+    /// together with their username, then computes `w` and `PRS`.
+    ///
+    /// This version requires the alloc feature and allocates space for
+    /// the username:password string on the heap.
     ///
     /// # Arguments:
     /// - `x_pub` - `x` from the protocol definition, used in generating the password related string (prs)
@@ -210,7 +345,8 @@ where
     /// - err(error::passwordhashing(hasher_error) | error::hashempty | error::hashsizeinvalid):
     ///     one of the three error variants that can result from the password hashing process
     ///
-    pub fn generate_cpace<'salt, P, S, H>(
+    #[cfg(feature = "alloc")]
+    pub fn generate_cpace_alloc<'salt, P, S>(
         self,
         x_pub: RistrettoPoint,
         password: P,
@@ -221,10 +357,9 @@ where
     where
         P: AsRef<[u8]>,
         S: Into<Salt<'a>>,
-        H: PasswordHasher,
     {
         let cofactor = Scalar::one();
-        let pw_hash = hash_password(self.username, password, salt, params, hasher)?;
+        let pw_hash = hash_password_alloc(self.username, password, salt, params, hasher)?;
         let w = scalar_from_hash(pw_hash)?;
 
         let prs = (x_pub * (w * cofactor)).compress().to_bytes();
@@ -394,8 +529,7 @@ where
 }
 
 /// Hash a username and password with the given password hasher
-#[cfg(not(feature = "alloc"))]
-fn hash_password<'a, U, P, S, H>(
+fn hash_password<'a, U, P, S, H, const BUFSIZ: usize>(
     username: U,
     password: P,
     salt: S,
@@ -408,10 +542,6 @@ where
     P: AsRef<[u8]>,
     S: Into<Salt<'a>>,
 {
-    // this could maybe be a generic but it would change the signature of functions that use it
-    // based on a feature flag so maybe not worth it?
-    const BUFSIZ: usize = 100;
-
     let user = username.as_ref();
     let pass = password.as_ref();
     let u = user.len();
@@ -433,7 +563,7 @@ where
 
 /// Hash a username and password with the given password hasher
 #[cfg(feature = "alloc")]
-fn hash_password<'a, U, P, S, H>(
+fn hash_password_alloc<'a, U, P, S, H>(
     username: U,
     password: P,
     salt: S,
@@ -497,4 +627,28 @@ pub enum ClientMessage<'a, const K1: usize> {
         /// The verifier computer from the user's password
         verifier: RistrettoPoint,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use password_hash::rand_core::OsRng;
+    use scrypt::{Params, Scrypt};
+
+    #[test]
+    #[cfg(all(feature = "alloc", feature = "getrandom", feature = "scrypt"))]
+    fn test_hash_password_no_std_and_alloc_agree() {
+        let username = "worf@starship.enterprise";
+        let password = "data_x_worf_4ever_<3";
+        let salt = SaltString::generate(OsRng);
+        let params = Params::recommended();
+
+        let no_std_res = hash_password::<&str, &str, &SaltString, Scrypt, 100>(
+            username, password, &salt, params, Scrypt,
+        )
+        .unwrap();
+        let alloc_res = hash_password_alloc(username, password, &salt, params, Scrypt).unwrap();
+
+        assert_eq!(alloc_res, no_std_res);
+    }
 }

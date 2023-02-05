@@ -1,6 +1,6 @@
 extern crate core;
 
-use aucpace::{AuCPaceClient, AuCPaceServer, ClientMessage, Database, Result, ServerMessage};
+use aucpace::{Client, ClientMessage, Database, Result, Server, ServerMessage};
 use curve25519_dalek::ristretto::RistrettoPoint;
 use password_hash::{ParamsString, SaltString};
 use rand_core::OsRng;
@@ -11,6 +11,24 @@ use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::thread;
 
+/// function like macro to wrap sending data over a tcp stream, returns the number of bytes sent
+macro_rules! send {
+    ($stream:ident, $msg:ident) => {{
+        let serialised = bincode::serialize(&$msg).unwrap();
+        $stream.write_all(&serialised).unwrap();
+        serialised.len()
+    }};
+}
+
+/// function like macro to wrap receiving data over a tcp stream, returns the message received
+macro_rules! recv {
+    ($stream:ident, $buf:ident) => {{
+        let bytes_received = $stream.read(&mut $buf).unwrap();
+        let received = &$buf[..bytes_received];
+        bincode::deserialize(received).unwrap()
+    }};
+}
+
 fn main() -> Result<()> {
     // example username and password, never user these...
     const USERNAME: &'static [u8] = b"jlpicard_1701";
@@ -20,11 +38,11 @@ fn main() -> Result<()> {
     let server_socket: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 25519);
 
     // register the user in the database
-    let mut base_client: AuCPaceClient<Sha512, OsRng, 16> = AuCPaceClient::new(OsRng);
+    let mut base_client = Client::new(OsRng);
     let mut database: SingleUserDatabase = Default::default();
 
     let params = Params::recommended();
-    let registration = base_client.register(USERNAME, PASSWORD, params, Scrypt)?;
+    let registration = base_client.register_alloc(USERNAME, PASSWORD, params, Scrypt)?;
     if let ClientMessage::Registration {
         username,
         salt,
@@ -43,19 +61,17 @@ fn main() -> Result<()> {
         // buffer for receiving packets
         let mut buf = [0u8; 1024];
 
-        let mut base_server: AuCPaceServer<Sha512, OsRng, 16> = AuCPaceServer::new(OsRng);
+        let mut base_server = Server::new(OsRng);
 
         // ===== SSID Establishment =====
         let (server, message) = base_server.begin();
-        println!("[server] Sending message: ServerNonce");
-        stream
-            .write_all(&bincode::serialize(&message).unwrap())
-            .unwrap();
+        let bytes_sent = send!(stream, message);
+        println!(
+            "[server] Sending message: ServerNonce, sent {} bytes",
+            bytes_sent
+        );
 
-        let mut bytes_received = stream.read(&mut buf).unwrap();
-        let mut received = &buf[..bytes_received];
-        let mut client_message: ClientMessage<16> = bincode::deserialize(received).unwrap();
-
+        let mut client_message: ClientMessage<16> = recv!(stream, buf);
         let server = if let ClientMessage::ClientNonce(client_nonce) = client_message {
             server.agree_ssid(client_nonce)
         } else {
@@ -63,32 +79,28 @@ fn main() -> Result<()> {
         };
 
         // ===== Augmentation Layer =====
-        bytes_received = stream.read(&mut buf).unwrap();
-        received = &buf[..bytes_received];
-        client_message = bincode::deserialize(received).unwrap();
-
+        client_message = recv!(stream, buf);
         let (server, message) = if let ClientMessage::Username(username) = client_message {
             server.generate_client_info(username, &database, OsRng)
         } else {
             panic!("Received invalid client message {:?}", client_message);
         };
-        println!("[server] Sending message: AugmentationInfo");
-        stream
-            .write_all(&bincode::serialize(&message).unwrap())
-            .unwrap();
+        let bytes_sent = send!(stream, message);
+        println!(
+            "[server] Sending message: AugmentationInfo, sent {} bytes",
+            bytes_sent
+        );
 
         // ===== CPace substep =====
         let ci = TcpChannelIdentifier::new(client_addr, server_socket).unwrap();
         let (server, message) = server.generate_public_key(ci);
-        println!("[server] Sending message: PublicKey");
-        stream
-            .write_all(&bincode::serialize(&message).unwrap())
-            .unwrap();
+        let bytes_sent = send!(stream, message);
+        println!(
+            "[server] Sending message: PublicKey, sent {} bytes",
+            bytes_sent
+        );
 
-        bytes_received = stream.read(&mut buf).unwrap();
-        received = &buf[..bytes_received];
-        client_message = bincode::deserialize(received).unwrap();
-
+        client_message = recv!(stream, buf);
         let server = if let ClientMessage::PublicKey(client_pubkey) = client_message {
             server.receive_client_pubkey(client_pubkey)
         } else {
@@ -96,16 +108,14 @@ fn main() -> Result<()> {
         };
 
         // ===== Explicit Mutual Authentication =====
-        bytes_received = stream.read(&mut buf).unwrap();
-        received = &buf[..bytes_received];
-        client_message = bincode::deserialize(received).unwrap();
-
+        client_message = recv!(stream, buf);
         if let ClientMessage::ClientAuthenticator(client_authenticator) = client_message {
             let (key, message) = server.receive_client_authenticator(client_authenticator)?;
-            println!("[server] Sending message: ServerAuthenticator");
-            stream
-                .write_all(&bincode::serialize(&message).unwrap())
-                .unwrap();
+            let bytes_sent = send!(stream, message);
+            println!(
+                "[server] Sending message: ServerAuthenticator, sent {} bytes",
+                bytes_sent
+            );
 
             // return the dervied key
             Ok(key)
@@ -123,15 +133,14 @@ fn main() -> Result<()> {
 
         // ===== SSID ESTABLISHMENT =====
         let (client, message) = base_client.begin();
-        println!("[client] Sending message: ClientNonce");
-        stream
-            .write_all(&bincode::serialize(&message).unwrap())
-            .unwrap();
+        let bytes_sent = send!(stream, message);
+        println!(
+            "[client] Sending message: ClientNonce, sent {} bytes",
+            bytes_sent
+        );
 
         // receive the server nonce to agree on SSID
-        let mut bytes_received = stream.read(&mut buf).unwrap();
-        let mut received = &buf[..bytes_received];
-        let mut server_message: ServerMessage<16> = bincode::deserialize(received).unwrap();
+        let mut server_message: ServerMessage<16> = recv!(stream, buf);
         let client = if let ServerMessage::ServerNonce(server_nonce) = server_message {
             client.agree_ssid(server_nonce)
         } else {
@@ -140,15 +149,13 @@ fn main() -> Result<()> {
 
         // ===== Augmentation Layer =====
         let (client, message) = client.start_augmentation(USERNAME);
-        println!("[client] Sending message: Username");
-        stream
-            .write_all(&bincode::serialize(&message).unwrap())
-            .unwrap();
+        let bytes_sent = send!(stream, message);
+        println!(
+            "[client] Sending message: Username, sent {} bytes",
+            bytes_sent
+        );
 
-        bytes_received = stream.read(&mut buf).unwrap();
-        received = &buf[..bytes_received];
-        server_message = bincode::deserialize(received).unwrap();
-
+        server_message = recv!(stream, buf);
         let client = if let ServerMessage::AugmentationInfo {
             x_pub,
             salt,
@@ -164,7 +171,7 @@ fn main() -> Result<()> {
 
                 Params::new(log_n, r, p).unwrap()
             };
-            client.generate_cpace(x_pub, PASSWORD, &salt, params, Scrypt)?
+            client.generate_cpace_alloc(x_pub, PASSWORD, &salt, params, Scrypt)?
         } else {
             panic!("Received invalid server message {:?}", server_message);
         };
@@ -172,14 +179,13 @@ fn main() -> Result<()> {
         // ===== CPace substep =====
         let ci = TcpChannelIdentifier::new(stream.local_addr().unwrap(), server_socket).unwrap();
         let (client, message) = client.generate_public_key(ci, &mut OsRng);
-        println!("[client] Sending message: PublicKey");
-        stream
-            .write_all(&bincode::serialize(&message).unwrap())
-            .unwrap();
+        let bytes_sent = send!(stream, message);
+        println!(
+            "[client] Sending message: PublicKey, sent {} bytes",
+            bytes_sent
+        );
 
-        bytes_received = stream.read(&mut buf).unwrap();
-        received = &buf[..bytes_received];
-        server_message = bincode::deserialize(received).unwrap();
+        server_message = recv!(stream, buf);
         let (client, message) = if let ServerMessage::PublicKey(server_pubkey) = server_message {
             client.receive_server_pubkey(server_pubkey)
         } else {
@@ -187,14 +193,13 @@ fn main() -> Result<()> {
         };
 
         // ===== Explicit Mutual Auth =====
-        println!("[client] Sending message: ClientAuthenticator");
-        stream
-            .write_all(&bincode::serialize(&message).unwrap())
-            .unwrap();
+        let bytes_sent = send!(stream, message);
+        println!(
+            "[client] Sending message: ClientAuthenticator, sent {} bytes",
+            bytes_sent
+        );
 
-        bytes_received = stream.read(&mut buf).unwrap();
-        received = &buf[..bytes_received];
-        server_message = bincode::deserialize(received).unwrap();
+        server_message = recv!(stream, buf);
         if let ServerMessage::ServerAuthenticator(server_authenticator) = server_message {
             client.receive_server_authenticator(server_authenticator)
         } else {
