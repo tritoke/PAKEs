@@ -26,7 +26,7 @@ subtle = { version = "2.4", default-features = false }
 
 [features]
 default = ["u64_backend"]
-debug = []
+alloc = []
 u32_backend = ["curve25519-dalek/u32_backend"]
 u64_backend = ["curve25519-dalek/u64_backend"]
 fiat-u32_backend = ["curve25519-dalek/fiat_u32_backend"]

@@ -18,6 +18,9 @@ use password_hash::{ParamsString, PasswordHash, PasswordHasher, Salt, SaltString
 use rand_core::{CryptoRng, RngCore};
 use subtle::ConstantTimeEq;
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
 /// Implementation of the client side of the AuCPace protocol
 pub struct AuCPaceClient<D, CSPRNG, const K1: usize>
 where
@@ -62,14 +65,15 @@ where
     /// - `next_step`: the client in the SSID establishment stage
     /// - `messsage`: the message to send to the server
     ///
-    pub fn register<'a, H>(
+    pub fn register<'a, P, H>(
         &mut self,
         username: &'a [u8],
-        password: impl AsRef<[u8]>,
+        password: P,
         params: H::Params,
         hasher: H,
     ) -> Result<ClientMessage<'a, K1>>
     where
+        P: AsRef<[u8]>,
         H: PasswordHasher,
     {
         // adapted from SaltString::generate, which we cannot use due to curve25519 versions of rand_core
@@ -202,15 +206,17 @@ where
     /// - err(error::passwordhashing(hasher_error) | error::hashempty | error::hashsizeinvalid):
     ///     one of the three error variants that can result from the password hashing process
     ///
-    pub fn generate_cpace<'salt, H>(
+    pub fn generate_cpace<'salt, P, S, H>(
         self,
         x_pub: RistrettoPoint,
-        password: impl AsRef<[u8]>,
-        salt: impl Into<Salt<'salt>>,
+        password: P,
+        salt: S,
         params: H::Params,
         hasher: H,
     ) -> Result<AuCPaceClientCPaceSubstep<D, K1>>
     where
+        P: AsRef<[u8]>,
+        S: Into<Salt<'a>>,
         H: PasswordHasher,
     {
         let cofactor = Scalar::one();
@@ -384,23 +390,66 @@ where
 }
 
 /// Hash a username and password with the given password hasher
-fn hash_password<'a, H>(
-    username: impl AsRef<[u8]>,
-    password: impl AsRef<[u8]>,
-    salt: impl Into<Salt<'a>>,
+#[cfg(not(feature = "alloc"))]
+fn hash_password<'a, U, P, S, H>(
+    username: U,
+    password: P,
+    salt: S,
     params: H::Params,
     hasher: H,
 ) -> Result<PasswordHash<'a>>
 where
     H: PasswordHasher,
+    U: AsRef<[u8]>,
+    P: AsRef<[u8]>,
+    S: Into<Salt<'a>>,
 {
-    // TODO: this is a stop-gap solution so I can use the function before
-    //       I work out how to do this without allocating...
+    // this could maybe be a generic but it would change the signature of functions that use it
+    // based on a feature flag so maybe not worth it?
+    const BUFSIZ: usize = 100;
+
+    let user = username.as_ref();
+    let pass = password.as_ref();
+    let u = user.len();
+    let p = pass.len();
+
+    if u + p + 1 > BUFSIZ {
+        return Err(Error::UsernameOrPasswordTooLong);
+    }
+
+    let mut buf = [0u8; BUFSIZ];
+    buf[0..u].copy_from_slice(user);
+    buf[u] = b':';
+    buf[u + 1..u + p + 1].copy_from_slice(pass);
+
+    hasher
+        .hash_password_customized(&buf, None, None, params, salt)
+        .map_err(Error::PasswordHashing)
+}
+
+/// Hash a username and password with the given password hasher
+#[cfg(feature = "alloc")]
+fn hash_password<'a, U, P, S, H>(
+    username: U,
+    password: P,
+    salt: S,
+    params: H::Params,
+    hasher: H,
+) -> Result<PasswordHash<'a>>
+where
+    H: PasswordHasher,
+    U: AsRef<[u8]>,
+    P: AsRef<[u8]>,
+    S: Into<Salt<'a>>,
+{
+    let user = username.as_ref();
+    let pass = password.as_ref();
 
     // hash "{username}:{password}"
-    let mut v = username.as_ref().to_vec();
+    let mut v = alloc::vec::Vec::with_capacity(user.len() + pass.len() + 1);
+    v.extend_from_slice(user);
     v.push(b':');
-    v.extend_from_slice(password.as_ref());
+    v.extend_from_slice(pass);
 
     hasher
         .hash_password_customized(v.as_slice(), None, None, params, salt)

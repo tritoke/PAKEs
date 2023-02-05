@@ -12,6 +12,9 @@ pub enum Error {
     HashSizeInvalid,
     /// Failure during Explicit Mutual Authentication
     MutualAuthFail,
+    /// The username:password string would overflow the buffer size allocated for hashing the password
+    /// Note: this error will only occur when not using the alloc feature
+    UsernameOrPasswordTooLong,
 }
 
 impl fmt::Display for Error {
@@ -24,6 +27,7 @@ impl fmt::Display for Error {
                 f,
                 "explicit mutual authentication failed, authenticators didn't match"
             ),
+            Error::UsernameOrPasswordTooLong => write!(f, "Username or password too long."),
         }
     }
 }

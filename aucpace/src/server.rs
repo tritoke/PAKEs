@@ -143,16 +143,18 @@ where
     /// - `next_step`: the server in the CPace substep stage
     /// - `messsage`: the message to send to the client
     ///
-    pub fn generate_client_info<CSPRNG>(
+    pub fn generate_client_info<U, DB, CSPRNG>(
         self,
-        username: impl AsRef<[u8]>,
-        database: &impl Database<PasswordVerifier = RistrettoPoint>,
+        username: U,
+        database: &DB,
         mut rng: CSPRNG,
     ) -> (
         AuCPaceServerCPaceSubstep<D, CSPRNG, K1>,
         ServerMessage<'static, K1>,
     )
     where
+        U: AsRef<[u8]>,
+        DB: Database<PasswordVerifier = RistrettoPoint>,
         CSPRNG: RngCore + CryptoRng,
     {
         // for ristretto255 the cofactor is 1, for normal curve25519 it is 8

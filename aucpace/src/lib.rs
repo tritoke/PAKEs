@@ -1,6 +1,4 @@
-// will refactor to be no_std, while developing I will keep std to make things easier for myself.
-// #![no_std]
-
+#![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 #![doc(
