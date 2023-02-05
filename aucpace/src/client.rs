@@ -4,8 +4,12 @@ use crate::utils::{
 };
 use crate::{
     errors::{Error, Result},
-    utils::{compute_ssid, generate_keypair, serde_paramsstring, serde_saltstring},
+    utils::{compute_ssid, generate_keypair},
 };
+
+#[cfg(feature = "serde")]
+use crate::utils::{serde_paramsstring, serde_saltstring};
+
 use core::marker::PhantomData;
 use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
 use curve25519_dalek::{
