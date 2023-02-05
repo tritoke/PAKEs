@@ -20,7 +20,7 @@ fn main() -> Result<()> {
     let server_socket: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 25519);
 
     // register the user in the database
-    let mut base_client: AuCPaceClient<Sha512, OsRng, 16> = AuCPaceClient::new(OsRng);
+    let mut base_client: AuCPaceClient<Sha512, OsRng, 16, 100> = AuCPaceClient::new(OsRng);
     let mut database: SingleUserDatabase = Default::default();
 
     let params = Params::recommended();

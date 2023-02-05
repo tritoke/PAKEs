@@ -26,7 +26,7 @@ use subtle::ConstantTimeEq;
 extern crate alloc;
 
 /// Implementation of the client side of the AuCPace protocol
-pub struct AuCPaceClient<D, CSPRNG, const K1: usize>
+pub struct AuCPaceClient<D, CSPRNG, const K1: usize, const BUFSIZ: usize>
 where
     D: Digest<OutputSize = U64> + Default,
     CSPRNG: RngCore + CryptoRng,
@@ -35,7 +35,7 @@ where
     d: PhantomData<D>,
 }
 
-impl<D, CSPRNG, const K1: usize> AuCPaceClient<D, CSPRNG, K1>
+impl<D, CSPRNG, const K1: usize, const BUFSIZ: usize> AuCPaceClient<D, CSPRNG, K1, BUFSIZ>
 where
     D: Digest<OutputSize = U64> + Default,
     CSPRNG: RngCore + CryptoRng,
@@ -55,7 +55,12 @@ where
     /// - `next_step`: the client in the SSID establishment stage
     /// - `messsage`: the message to send to the server
     ///
-    pub fn begin(&mut self) -> (AuCPaceClientSsidEstablish<D, K1>, ClientMessage<'_, K1>) {
+    pub fn begin(
+        &mut self,
+    ) -> (
+        AuCPaceClientSsidEstablish<D, K1, BUFSIZ>,
+        ClientMessage<'_, K1>,
+    ) {
         let next_step = AuCPaceClientSsidEstablish::new(&mut self.rng);
         let message = ClientMessage::ClientNonce(next_step.nonce);
 
@@ -86,7 +91,13 @@ where
         let salt_string = SaltString::b64_encode(&salt).expect("Salt length invariant broken.");
 
         // compute the verifier W
-        let pw_hash = hash_password(username, password, &salt_string, params.clone(), hasher)?;
+        let pw_hash = hash_password::<&[u8], P, &SaltString, H, BUFSIZ>(
+            username,
+            password,
+            &salt_string,
+            params.clone(),
+            hasher,
+        )?;
         let cofactor = Scalar::one();
         let w = scalar_from_hash(pw_hash)?;
         let verifier = RISTRETTO_BASEPOINT_POINT * (w * cofactor);
@@ -104,7 +115,7 @@ where
 }
 
 /// Client in the SSID agreement phase
-pub struct AuCPaceClientSsidEstablish<D, const K1: usize>
+pub struct AuCPaceClientSsidEstablish<D, const K1: usize, const BUFSIZ: usize>
 where
     D: Digest<OutputSize = U64> + Default,
 {
@@ -112,7 +123,7 @@ where
     d: PhantomData<D>,
 }
 
-impl<D, const K1: usize> AuCPaceClientSsidEstablish<D, K1>
+impl<D, const K1: usize, const BUFSIZ: usize> AuCPaceClientSsidEstablish<D, K1, BUFSIZ>
 where
     D: Digest<OutputSize = U64> + Default,
 {
@@ -134,21 +145,21 @@ where
     /// # return:
     /// `next_step`: the client in the pre-augmentation stage
     ///
-    pub fn agree_ssid(self, server_nonce: [u8; K1]) -> AuCPaceClientPreAug<D, K1> {
+    pub fn agree_ssid(self, server_nonce: [u8; K1]) -> AuCPaceClientPreAug<D, K1, BUFSIZ> {
         let ssid = compute_ssid::<D, K1>(server_nonce, self.nonce);
         AuCPaceClientPreAug::new(ssid)
     }
 }
 
 /// Client in the pre-augmentation phase
-pub struct AuCPaceClientPreAug<D, const K1: usize>
+pub struct AuCPaceClientPreAug<D, const K1: usize, const BUFSIZ: usize>
 where
     D: Digest<OutputSize = U64> + Default,
 {
     ssid: Output<D>,
 }
 
-impl<D, const K1: usize> AuCPaceClientPreAug<D, K1>
+impl<D, const K1: usize, const BUFSIZ: usize> AuCPaceClientPreAug<D, K1, BUFSIZ>
 where
     D: Digest<OutputSize = U64> + Default,
 {
@@ -169,7 +180,10 @@ where
     pub fn start_augmentation(
         self,
         username: &[u8],
-    ) -> (AuCPaceClientAugLayer<'_, D, K1>, ClientMessage<'_, K1>) {
+    ) -> (
+        AuCPaceClientAugLayer<'_, D, K1, BUFSIZ>,
+        ClientMessage<'_, K1>,
+    ) {
         let next_step = AuCPaceClientAugLayer::new(self.ssid, username);
         let message = ClientMessage::Username(username);
 
@@ -178,7 +192,7 @@ where
 }
 
 /// Client in the augmentation layer
-pub struct AuCPaceClientAugLayer<'a, D, const K1: usize>
+pub struct AuCPaceClientAugLayer<'a, D, const K1: usize, const BUFSIZ: usize>
 where
     D: Digest<OutputSize = U64> + Default,
 {
@@ -186,7 +200,7 @@ where
     username: &'a [u8],
 }
 
-impl<'a, D, const K1: usize> AuCPaceClientAugLayer<'a, D, K1>
+impl<'a, D, const K1: usize, const BUFSIZ: usize> AuCPaceClientAugLayer<'a, D, K1, BUFSIZ>
 where
     D: Digest<OutputSize = U64> + Default,
 {
@@ -224,7 +238,8 @@ where
         H: PasswordHasher,
     {
         let cofactor = Scalar::one();
-        let pw_hash = hash_password(self.username, password, salt, params, hasher)?;
+        let pw_hash =
+            hash_password::<&[u8], P, S, H, BUFSIZ>(self.username, password, salt, params, hasher)?;
         let w = scalar_from_hash(pw_hash)?;
 
         let prs = (x_pub * (w * cofactor)).compress().to_bytes();
@@ -395,7 +410,7 @@ where
 
 /// Hash a username and password with the given password hasher
 #[cfg(not(feature = "alloc"))]
-fn hash_password<'a, U, P, S, H>(
+fn hash_password<'a, U, P, S, H, const BUFSIZ: usize>(
     username: U,
     password: P,
     salt: S,
@@ -410,7 +425,7 @@ where
 {
     // this could maybe be a generic but it would change the signature of functions that use it
     // based on a feature flag so maybe not worth it?
-    const BUFSIZ: usize = 100;
+    // const BUFSIZ: usize = 100;
 
     let user = username.as_ref();
     let pass = password.as_ref();
@@ -433,7 +448,7 @@ where
 
 /// Hash a username and password with the given password hasher
 #[cfg(feature = "alloc")]
-fn hash_password<'a, U, P, S, H>(
+fn hash_password<'a, U, P, S, H, const _BUFSIZ: usize>(
     username: U,
     password: P,
     salt: S,
