@@ -38,6 +38,7 @@ getrandom = ["rand_core/getrandom"]
 
 [dev-dependencies]
 bincode = "1"
+postcard = "1"
 
 [[example]]
 name = "key_agreement"

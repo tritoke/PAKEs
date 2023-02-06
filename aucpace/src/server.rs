@@ -70,7 +70,7 @@ where
         ServerMessage<'static, K1>,
     ) {
         let next_step = AuCPaceServerSsidEstablish::new(self.secret.clone(), &mut self.rng);
-        let message = ServerMessage::ServerNonce(next_step.nonce);
+        let message = ServerMessage::Nonce(next_step.nonce);
         (next_step, message)
     }
 }
@@ -355,7 +355,7 @@ where
         let (ta, tb) = compute_authenticator_messages::<D>(self.ssid, self.sk1);
         if tb.ct_eq(&client_authenticator).into() {
             let sk = compute_session_key::<D>(self.ssid, self.sk1);
-            let message = ServerMessage::ServerAuthenticator(
+            let message = ServerMessage::Authenticator(
                 ta.as_slice()
                     .try_into()
                     .expect("array length invariant broken"),
@@ -379,7 +379,7 @@ use crate::utils::{serde_paramsstring, serde_saltstring};
 #[derive(Debug)]
 pub enum ServerMessage<'a, const K1: usize> {
     /// SSID establishment message - the server's nonce: `s`
-    ServerNonce(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; K1]),
+    Nonce(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; K1]),
 
     /// Information required for the AuCPace Augmentation layer sub-step
     AugmentationInfo {
@@ -402,5 +402,5 @@ pub enum ServerMessage<'a, const K1: usize> {
     PublicKey(RistrettoPoint),
 
     /// Explicit Mutual Authentication - the server's authenticator: `Ta`
-    ServerAuthenticator(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; 64]),
+    Authenticator(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; 64]),
 }

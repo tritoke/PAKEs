@@ -70,13 +70,10 @@ fn main() -> Result<()> {
         let (server, message) = base_server.begin();
         let bytes_sent = send!(stream, message);
         SERVER_BYTES_SENT.fetch_add(bytes_sent, Ordering::SeqCst);
-        println!(
-            "[server] Sending message: ServerNonce, sent {} bytes",
-            bytes_sent
-        );
+        println!("[server] Sending message: Nonce, sent {} bytes", bytes_sent);
 
         let mut client_message: ClientMessage<16> = recv!(stream, buf);
-        let server = if let ClientMessage::ClientNonce(client_nonce) = client_message {
+        let server = if let ClientMessage::Nonce(client_nonce) = client_message {
             server.agree_ssid(client_nonce)
         } else {
             panic!("Received invalid client message {:?}", client_message);
@@ -115,12 +112,12 @@ fn main() -> Result<()> {
 
         // ===== Explicit Mutual Authentication =====
         client_message = recv!(stream, buf);
-        if let ClientMessage::ClientAuthenticator(client_authenticator) = client_message {
+        if let ClientMessage::Authenticator(client_authenticator) = client_message {
             let (key, message) = server.receive_client_authenticator(client_authenticator)?;
             let bytes_sent = send!(stream, message);
             SERVER_BYTES_SENT.fetch_add(bytes_sent, Ordering::SeqCst);
             println!(
-                "[server] Sending message: ServerAuthenticator, sent {} bytes",
+                "[server] Sending message: Authenticator, sent {} bytes",
                 bytes_sent
             );
 
@@ -134,22 +131,17 @@ fn main() -> Result<()> {
     // spawn a thread for the client
     let client_thread = thread::spawn(move || -> Result<Output<Sha512>> {
         let mut stream = TcpStream::connect(server_socket).unwrap();
-
-        // wrappers for sending and receiving messages
         let mut buf = [0u8; 1024];
 
         // ===== SSID ESTABLISHMENT =====
         let (client, message) = base_client.begin();
         let bytes_sent = send!(stream, message);
         CLIENT_BYTES_SENT.fetch_add(bytes_sent, Ordering::SeqCst);
-        println!(
-            "[client] Sending message: ClientNonce, sent {} bytes",
-            bytes_sent
-        );
+        println!("[client] Sending message: Nonce, sent {} bytes", bytes_sent);
 
         // receive the server nonce to agree on SSID
         let mut server_message: ServerMessage<16> = recv!(stream, buf);
-        let client = if let ServerMessage::ServerNonce(server_nonce) = server_message {
+        let client = if let ServerMessage::Nonce(server_nonce) = server_message {
             client.agree_ssid(server_nonce)
         } else {
             panic!("Received invalid server message {:?}", server_message);
@@ -206,12 +198,12 @@ fn main() -> Result<()> {
         let bytes_sent = send!(stream, message);
         CLIENT_BYTES_SENT.fetch_add(bytes_sent, Ordering::SeqCst);
         println!(
-            "[client] Sending message: ClientAuthenticator, sent {} bytes",
+            "[client] Sending message: Authenticator, sent {} bytes",
             bytes_sent
         );
 
         server_message = recv!(stream, buf);
-        if let ServerMessage::ServerAuthenticator(server_authenticator) = server_message {
+        if let ServerMessage::Authenticator(server_authenticator) = server_message {
             client.receive_server_authenticator(server_authenticator)
         } else {
             panic!("Received invalid server message {:?}", server_message);

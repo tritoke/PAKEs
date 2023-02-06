@@ -61,7 +61,7 @@ where
     ///
     pub fn begin(&mut self) -> (AuCPaceClientSsidEstablish<D, H, K1>, ClientMessage<'_, K1>) {
         let next_step = AuCPaceClientSsidEstablish::new(&mut self.rng);
-        let message = ClientMessage::ClientNonce(next_step.nonce);
+        let message = ClientMessage::Nonce(next_step.nonce);
 
         (next_step, message)
     }
@@ -457,7 +457,7 @@ where
         let sk1 = compute_first_session_key::<D>(self.ssid, self.priv_key, server_pubkey);
         let (ta, tb) = compute_authenticator_messages::<D>(self.ssid, sk1);
         let next_step = AuCPaceClientExpMutAuth::new(self.ssid, sk1, ta);
-        let message = ClientMessage::ClientAuthenticator(
+        let message = ClientMessage::Authenticator(
             tb.as_slice()
                 .try_into()
                 .expect("array length invariant broken"),
@@ -599,7 +599,7 @@ where
 #[derive(Debug)]
 pub enum ClientMessage<'a, const K1: usize> {
     /// SSID establishment message - the client's nonce: `t`
-    ClientNonce(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; K1]),
+    Nonce(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; K1]),
 
     /// Username - the client's username
     Username(&'a [u8]),
@@ -608,7 +608,7 @@ pub enum ClientMessage<'a, const K1: usize> {
     PublicKey(RistrettoPoint),
 
     /// Explicit Mutual Authentication - the client's authenticator: `Tb`
-    ClientAuthenticator(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; 64]),
+    Authenticator(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; 64]),
 
     /// Registration - the username, verifier, salt and parameters needed for registering a user
     /// NOTE: if the UAD field is desired this should be handled separately and sent at the same time
