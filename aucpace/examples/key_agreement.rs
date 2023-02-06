@@ -9,6 +9,7 @@ use sha2::digest::Output;
 use sha2::Sha512;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 /// function like macro to wrap sending data over a tcp stream, returns the number of bytes sent
@@ -53,6 +54,9 @@ fn main() -> Result<()> {
         database.store_verifier(username, salt, None, verifier, params);
     }
 
+    static CLIENT_BYTES_SENT: AtomicUsize = AtomicUsize::new(0);
+    static SERVER_BYTES_SENT: AtomicUsize = AtomicUsize::new(0);
+
     // spawn a thread for the server
     let server_thread = thread::spawn(move || -> Result<Output<Sha512>> {
         let listener = TcpListener::bind(server_socket).unwrap();
@@ -60,12 +64,12 @@ fn main() -> Result<()> {
 
         // buffer for receiving packets
         let mut buf = [0u8; 1024];
-
         let mut base_server = Server::new(OsRng);
 
         // ===== SSID Establishment =====
         let (server, message) = base_server.begin();
         let bytes_sent = send!(stream, message);
+        SERVER_BYTES_SENT.fetch_add(bytes_sent, Ordering::SeqCst);
         println!(
             "[server] Sending message: ServerNonce, sent {} bytes",
             bytes_sent
@@ -86,6 +90,7 @@ fn main() -> Result<()> {
             panic!("Received invalid client message {:?}", client_message);
         };
         let bytes_sent = send!(stream, message);
+        SERVER_BYTES_SENT.fetch_add(bytes_sent, Ordering::SeqCst);
         println!(
             "[server] Sending message: AugmentationInfo, sent {} bytes",
             bytes_sent
@@ -95,6 +100,7 @@ fn main() -> Result<()> {
         let ci = TcpChannelIdentifier::new(client_addr, server_socket).unwrap();
         let (server, message) = server.generate_public_key(ci);
         let bytes_sent = send!(stream, message);
+        SERVER_BYTES_SENT.fetch_add(bytes_sent, Ordering::SeqCst);
         println!(
             "[server] Sending message: PublicKey, sent {} bytes",
             bytes_sent
@@ -112,6 +118,7 @@ fn main() -> Result<()> {
         if let ClientMessage::ClientAuthenticator(client_authenticator) = client_message {
             let (key, message) = server.receive_client_authenticator(client_authenticator)?;
             let bytes_sent = send!(stream, message);
+            SERVER_BYTES_SENT.fetch_add(bytes_sent, Ordering::SeqCst);
             println!(
                 "[server] Sending message: ServerAuthenticator, sent {} bytes",
                 bytes_sent
@@ -134,6 +141,7 @@ fn main() -> Result<()> {
         // ===== SSID ESTABLISHMENT =====
         let (client, message) = base_client.begin();
         let bytes_sent = send!(stream, message);
+        CLIENT_BYTES_SENT.fetch_add(bytes_sent, Ordering::SeqCst);
         println!(
             "[client] Sending message: ClientNonce, sent {} bytes",
             bytes_sent
@@ -150,6 +158,7 @@ fn main() -> Result<()> {
         // ===== Augmentation Layer =====
         let (client, message) = client.start_augmentation(USERNAME);
         let bytes_sent = send!(stream, message);
+        CLIENT_BYTES_SENT.fetch_add(bytes_sent, Ordering::SeqCst);
         println!(
             "[client] Sending message: Username, sent {} bytes",
             bytes_sent
@@ -180,6 +189,7 @@ fn main() -> Result<()> {
         let ci = TcpChannelIdentifier::new(stream.local_addr().unwrap(), server_socket).unwrap();
         let (client, message) = client.generate_public_key(ci, &mut OsRng);
         let bytes_sent = send!(stream, message);
+        CLIENT_BYTES_SENT.fetch_add(bytes_sent, Ordering::SeqCst);
         println!(
             "[client] Sending message: PublicKey, sent {} bytes",
             bytes_sent
@@ -194,6 +204,7 @@ fn main() -> Result<()> {
 
         // ===== Explicit Mutual Auth =====
         let bytes_sent = send!(stream, message);
+        CLIENT_BYTES_SENT.fetch_add(bytes_sent, Ordering::SeqCst);
         println!(
             "[client] Sending message: ClientAuthenticator, sent {} bytes",
             bytes_sent
@@ -214,6 +225,14 @@ fn main() -> Result<()> {
     println!(
         "Negotiation finished, both parties arrived at a key of: {:X}",
         client_key
+    );
+    println!(
+        "Client sent {} bytes total",
+        CLIENT_BYTES_SENT.load(Ordering::SeqCst)
+    );
+    println!(
+        "Server sent {} bytes total",
+        SERVER_BYTES_SENT.load(Ordering::SeqCst)
     );
 
     Ok(())
