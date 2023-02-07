@@ -92,6 +92,9 @@ pub mod client;
 /// Module containing the implementation of the server for the AuCPace protocol
 pub mod server;
 
+/// Module contains constants used in the code
+pub mod constants;
+
 #[rustfmt::skip]
 pub use self::{
     client::{

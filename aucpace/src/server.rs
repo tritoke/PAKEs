@@ -1,10 +1,12 @@
+use crate::constants::MIN_SSID_LEN;
 use crate::database::Database;
 use crate::utils::{
     compute_authenticator_messages, compute_first_session_key, compute_session_key, compute_ssid,
-    generate_keypair, generate_nonce,
+    generate_keypair, generate_nonce, H0,
 };
 use crate::{Error, Result};
 use core::marker::PhantomData;
+use core::ptr::hash;
 use curve25519_dalek::{
     constants::RISTRETTO_BASEPOINT_POINT,
     digest::consts::U64,
@@ -72,6 +74,33 @@ where
         let next_step = AuCPaceServerSsidEstablish::new(self.secret.clone(), &mut self.rng);
         let message = ServerMessage::Nonce(next_step.nonce);
         (next_step, message)
+    }
+
+    /// Create a new server in the Augmentation layer phase, provided an SSID
+    ///
+    /// # Argument:
+    /// - `ssid`: Some data to be hashed and act as the sub-session ID
+    ///
+    /// # Return:
+    /// (`next_step`, `message`)
+    /// - `next_step`: the server in the SSID establishment stage
+    /// - `messsage`: the message to send to the server
+    ///
+    pub fn begin_prestablished_ssid<S>(&mut self, ssid: S) -> Result<AuCPaceServerAugLayer<D, K1>>
+    where
+        S: AsRef<[u8]>,
+    {
+        // if the SSID isn't long enough return an error
+        if ssid.as_ref().len() < MIN_SSID_LEN {
+            return Err(Error::InsecureSsid);
+        }
+
+        // hash the SSID and begin the next step
+        let mut hasher: D = H0();
+        hasher.update(ssid);
+        let ssid_hash = hasher.finalize();
+        let next_step = AuCPaceServerAugLayer::new(self.secret.clone(), ssid_hash);
+        Ok(next_step)
     }
 }
 

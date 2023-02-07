@@ -1,4 +1,5 @@
 use core::fmt;
+use core::fmt::write;
 
 /// Errors that can occur during the protocol
 #[non_exhaustive]
@@ -13,8 +14,11 @@ pub enum Error {
     /// Failure during Explicit Mutual Authentication
     MutualAuthFail,
     /// The username:password string would overflow the buffer size allocated for hashing the password
-    /// Note: this error will only occur when not using the alloc feature
+    /// Note: this error can only occur when using the *_alloc APIs
     UsernameOrPasswordTooLong,
+    /// The SSID provided is too short to be secure, SSIDs must be at least 16 bytes long
+    /// Note: this error can only occur if the SSID establishment phase is bypassed
+    InsecureSsid,
 }
 
 impl fmt::Display for Error {
@@ -27,7 +31,11 @@ impl fmt::Display for Error {
                 f,
                 "explicit mutual authentication failed, authenticators didn't match"
             ),
-            Error::UsernameOrPasswordTooLong => write!(f, "Username or password too long."),
+            Error::UsernameOrPasswordTooLong => write!(f, "Username or password too long"),
+            Error::InsecureSsid => write!(
+                f,
+                "Provided SSID is insecure - SSIDs must be at least 16 bytes long"
+            ),
         }
     }
 }
