@@ -1,5 +1,4 @@
 use core::fmt;
-use core::fmt::write;
 
 /// Errors that can occur during the protocol
 #[non_exhaustive]

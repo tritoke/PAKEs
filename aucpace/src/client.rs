@@ -1,6 +1,6 @@
 use crate::utils::{
     compute_authenticator_messages, compute_first_session_key, compute_session_key, generate_nonce,
-    scalar_from_hash,
+    scalar_from_hash, H0,
 };
 use crate::{
     errors::{Error, Result},
@@ -10,6 +10,7 @@ use crate::{
 #[cfg(feature = "serde")]
 use crate::utils::{serde_paramsstring, serde_saltstring};
 
+use crate::constants::MIN_SSID_LEN;
 use core::marker::PhantomData;
 use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
 use curve25519_dalek::{
@@ -66,6 +67,32 @@ where
         (next_step, message)
     }
 
+    /// Create a new client in the pre-augmentation layer phase, provided an SSID
+    ///
+    /// # Argument:
+    /// - `ssid`: Some data to be hashed and act as the sub-session ID
+    ///
+    /// # Return:
+    /// - Ok(`next_step`): the server in the SSID establishment stage
+    /// - Err(Error::InsecureSsid): the SSID provided was not long enough to be secure
+    ///
+    pub fn begin_prestablished_ssid<S>(&mut self, ssid: S) -> Result<AuCPaceClientPreAug<D, H, K1>>
+    where
+        S: AsRef<[u8]>,
+    {
+        // if the SSID isn't long enough return an error
+        if ssid.as_ref().len() < MIN_SSID_LEN {
+            return Err(Error::InsecureSsid);
+        }
+
+        // hash the SSID and begin the next step
+        let mut hasher: D = H0();
+        hasher.update(ssid);
+        let ssid_hash = hasher.finalize();
+        let next_step = AuCPaceClientPreAug::new(ssid_hash);
+        Ok(next_step)
+    }
+
     /// Register a username/password
     ///
     /// # Arguments:
@@ -107,6 +134,7 @@ where
             params.clone(),
             hasher,
         )?;
+
         let cofactor = Scalar::one();
         let w = scalar_from_hash(pw_hash)?;
         let verifier = RISTRETTO_BASEPOINT_POINT * (w * cofactor);
@@ -556,9 +584,11 @@ where
     buf[u] = b':';
     buf[u + 1..u + p + 1].copy_from_slice(pass);
 
-    hasher
+    let hash = hasher
         .hash_password_customized(&buf[0..u + p + 1], None, None, params, salt)
-        .map_err(Error::PasswordHashing)
+        .map_err(Error::PasswordHashing);
+
+    hash
 }
 
 /// Hash a username and password with the given password hasher
@@ -632,7 +662,8 @@ pub enum ClientMessage<'a, const K1: usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use password_hash::rand_core::OsRng;
+    use crate::Client;
+    use rand_core::OsRng;
     use scrypt::{Params, Scrypt};
 
     #[test]
@@ -640,8 +671,12 @@ mod tests {
     fn test_hash_password_no_std_and_alloc_agree() {
         let username = "worf@starship.enterprise";
         let password = "data_x_worf_4ever_<3";
-        let salt = SaltString::generate(OsRng);
-        let params = Params::recommended();
+        let mut bytes = [0u8; Salt::RECOMMENDED_LENGTH];
+        OsRng.fill_bytes(&mut bytes);
+        let salt = SaltString::b64_encode(&bytes).expect("Salt length invariant broken.");
+        // These are weak parameters, do not use them
+        // they are used here to make the test run faster
+        let params = Params::new(1, 8, 1).unwrap();
 
         let no_std_res = hash_password::<&str, &str, &SaltString, Scrypt, 100>(
             username, password, &salt, params, Scrypt,
@@ -650,5 +685,13 @@ mod tests {
         let alloc_res = hash_password_alloc(username, password, &salt, params, Scrypt).unwrap();
 
         assert_eq!(alloc_res, no_std_res);
+    }
+
+    #[test]
+    #[cfg(all(feature = "getrandom"))]
+    fn test_client_doesnt_accept_insecure_ssid() {
+        let mut client = Client::new(OsRng);
+        let res = client.begin_prestablished_ssid("bad ssid");
+        assert!(matches!(res, Err(Error::InsecureSsid)));
     }
 }

@@ -6,7 +6,6 @@ use crate::utils::{
 };
 use crate::{Error, Result};
 use core::marker::PhantomData;
-use core::ptr::hash;
 use curve25519_dalek::{
     constants::RISTRETTO_BASEPOINT_POINT,
     digest::consts::U64,
@@ -82,9 +81,8 @@ where
     /// - `ssid`: Some data to be hashed and act as the sub-session ID
     ///
     /// # Return:
-    /// (`next_step`, `message`)
-    /// - `next_step`: the server in the SSID establishment stage
-    /// - `messsage`: the message to send to the server
+    /// - Ok(`next_step`): the server in the SSID establishment stage
+    /// - Err(Error::InsecureSsid): the SSID provided was not long enough to be secure
     ///
     pub fn begin_prestablished_ssid<S>(&mut self, ssid: S) -> Result<AuCPaceServerAugLayer<D, K1>>
     where
@@ -432,4 +430,18 @@ pub enum ServerMessage<'a, const K1: usize> {
 
     /// Explicit Mutual Authentication - the server's authenticator: `Ta`
     Authenticator(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; 64]),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Server;
+    use rand_core::OsRng;
+
+    #[test]
+    fn test_server_doesnt_accept_insecure_ssid() {
+        let mut server = Server::new(OsRng);
+        let res = server.begin_prestablished_ssid("bad ssid");
+        assert!(matches!(res, Err(Error::InsecureSsid)));
+    }
 }

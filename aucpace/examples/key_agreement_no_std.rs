@@ -1,8 +1,8 @@
 #![no_std]
 
-// use println only from std
+// use println and Instant only from std
 extern crate std;
-use std::println;
+use std::{println, time::Instant};
 
 use aucpace::{Client, ClientMessage, Database, Result, Server, ServerMessage};
 use curve25519_dalek::ristretto::RistrettoPoint;
@@ -36,6 +36,7 @@ fn main() -> Result<()> {
     let mut base_client = Client::new(OsRng);
     let mut database: SingleUserDatabase<100> = Default::default();
 
+    let start = Instant::now();
     let params = Params::recommended();
     let registration = base_client.register::<&[u8], 100>(USERNAME, PASSWORD, params, Scrypt)?;
     if let ClientMessage::Registration {
@@ -47,9 +48,19 @@ fn main() -> Result<()> {
     {
         database.store_verifier(username, salt, None, verifier, params);
     }
+    println!(
+        "Registered `{}:{}` in {}ms",
+        core::str::from_utf8(USERNAME).unwrap(),
+        core::str::from_utf8(PASSWORD).unwrap(),
+        Instant::now().duration_since(start).as_millis()
+    );
 
+    // count the number of bytes sent by each side
     let mut client_bytes_sent = 0;
     let mut server_bytes_sent = 0;
+
+    // time how long the protocol takes
+    let start = Instant::now();
 
     // buffers for receiving packets
     let mut client_buf = [0u8; 1024];
@@ -207,6 +218,9 @@ fn main() -> Result<()> {
         panic!("Received invalid server message {:?}", server_message);
     };
 
+    // record end time
+    let end = Instant::now();
+
     // ===== Protocol end =====
     // assert that both threads arrived at the same key
     assert_eq!(client_key, server_key);
@@ -217,6 +231,10 @@ fn main() -> Result<()> {
 
     println!("Client sent {} bytes total", client_bytes_sent);
     println!("Server sent {} bytes total", server_bytes_sent);
+    println!(
+        "The computation took {}ms",
+        end.duration_since(start).as_millis()
+    );
 
     Ok(())
 }

@@ -11,6 +11,7 @@ use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
+use std::time::Instant;
 
 /// function like macro to wrap sending data over a tcp stream, returns the number of bytes sent
 macro_rules! send {
@@ -59,6 +60,9 @@ fn main() -> Result<()> {
 
     // spawn a thread for the server
     let server_thread = thread::spawn(move || -> Result<Output<Sha512>> {
+        let start = Instant::now();
+        println!("[server] Starting negotiation");
+
         let listener = TcpListener::bind(server_socket).unwrap();
         let (mut stream, client_addr) = listener.accept().unwrap();
 
@@ -121,6 +125,10 @@ fn main() -> Result<()> {
                 bytes_sent
             );
 
+            println!(
+                "[server] Derived final key in {}ms",
+                Instant::now().duration_since(start).as_millis()
+            );
             // return the dervied key
             Ok(key)
         } else {
@@ -130,6 +138,9 @@ fn main() -> Result<()> {
 
     // spawn a thread for the client
     let client_thread = thread::spawn(move || -> Result<Output<Sha512>> {
+        println!("[client] Starting negotiation");
+        let start = Instant::now();
+
         let mut stream = TcpStream::connect(server_socket).unwrap();
         let mut buf = [0u8; 1024];
 
@@ -203,11 +214,18 @@ fn main() -> Result<()> {
         );
 
         server_message = recv!(stream, buf);
-        if let ServerMessage::Authenticator(server_authenticator) = server_message {
+        let key = if let ServerMessage::Authenticator(server_authenticator) = server_message {
             client.receive_server_authenticator(server_authenticator)
         } else {
             panic!("Received invalid server message {:?}", server_message);
-        }
+        };
+
+        println!(
+            "[client] Derived final key in {}ms",
+            Instant::now().duration_since(start).as_millis()
+        );
+
+        key
     });
 
     // assert that both threads arrived at the same key
