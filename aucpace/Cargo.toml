@@ -29,6 +29,7 @@ sha2 = { version = "0.9", default-features = false, optional = true }
 [features]
 default = ["u64_backend", "scrypt", "sha2", "getrandom"]
 alloc = []
+partial_augmentation = []
 u32_backend = ["curve25519-dalek/u32_backend"]
 u64_backend = ["curve25519-dalek/u64_backend"]
 fiat-u32_backend = ["curve25519-dalek/fiat_u32_backend"]

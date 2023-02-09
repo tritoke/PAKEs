@@ -7,6 +7,9 @@ pub trait Database {
 
     /// perform LookupW, returning the password verifier W if it exists
     ///
+    /// # Arguments:
+    /// `username`: the user the lookup the verifier for
+    ///
     /// # Return:
     /// `(password verifier, salt, sigma)`
     /// where `password verifier` is the verifier stored for the given user
@@ -41,10 +44,21 @@ pub trait Database {
     );
 }
 
+/// trait for AuCPace to use to abstract over the storage and retrieval of verifiers
+#[cfg(feature = "partial_augmentation")]
 pub trait PartialAugDatabase: Database {
     type PublicKey;
     type PrivateKey;
 
+    /// retrieve a long-term key pair from the database
+    ///
+    /// # Arguments:
+    /// `username`: the user the lookup the keypair for
+    ///
+    /// # Return:
+    /// - Some((`public_key`, `private_key`)): if the user has a long term keypair associated with them
+    /// - None: if the user has no associated keypair
+    ///
     fn lookup_long_term_keypair(
         &self,
         username: &[u8],
