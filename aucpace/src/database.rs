@@ -40,3 +40,13 @@ pub trait Database {
         params: ParamsString,
     );
 }
+
+pub trait PartialAugDatabase: Database {
+    type PublicKey;
+    type PrivateKey;
+
+    fn lookup_long_term_keypair(
+        &self,
+        username: &[u8],
+    ) -> Option<(Self::PublicKey, Self::PrivateKey)>;
+}
