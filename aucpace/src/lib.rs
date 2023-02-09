@@ -80,6 +80,8 @@
 //! - `sk1` — first session key derived from K
 //! - `sk` — the final session key refreshed from sk1
 //!
+//! TODO: make a ladder diagram for the various structs and messages that are exchanged in the actual code
+//!
 //! [1]: https://eprint.iacr.org/2018/286.pdf
 
 mod database;

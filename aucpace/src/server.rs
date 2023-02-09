@@ -191,6 +191,26 @@ where
         let x_pub = RISTRETTO_BASEPOINT_POINT * x;
 
         // generate the password related string (PRS) and the client info
+        let (prs, message) = self.generate_prs(username, database, &mut rng, x, x_pub);
+        let next_step = AuCPaceServerCPaceSubstep::new(self.ssid, prs, rng);
+
+        (next_step, message)
+    }
+
+    fn generate_prs<U, DB, CSPRNG>(
+        &self,
+        username: U,
+        database: &DB,
+        rng: &mut CSPRNG,
+        x: Scalar,
+        x_pub: RistrettoPoint,
+    ) -> ([u8; 32], ServerMessage<'static, K1>)
+    where
+        U: AsRef<[u8]>,
+        DB: Database<PasswordVerifier = RistrettoPoint>,
+        CSPRNG: RngCore + CryptoRng,
+    {
+        // generate the password related string (PRS) and the client info
         let prs;
         let message;
         if let Some((w, salt, sigma)) = database.lookup_verifier(username.as_ref()) {
@@ -232,9 +252,7 @@ where
             };
         };
 
-        let next_step = AuCPaceServerCPaceSubstep::new(self.ssid, prs, rng);
-
-        (next_step, message)
+        (prs, message)
     }
 }
 
