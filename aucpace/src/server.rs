@@ -17,6 +17,9 @@ use password_hash::{ParamsString, SaltString};
 use rand_core::{CryptoRng, RngCore};
 use subtle::ConstantTimeEq;
 
+#[cfg(feature = "partial_augmentation")]
+use crate::database::PartialAugDatabase;
+
 /// A non-copy wrapper around u64
 #[derive(Clone)]
 struct ServerSecret(u64);
@@ -190,29 +193,75 @@ where
         let x = Scalar::random(&mut rng) * cofactor;
         let x_pub = RISTRETTO_BASEPOINT_POINT * x;
 
-        // generate the password related string (PRS) and the client info
+        // generate the prs and client message
         let (prs, message) = self.generate_prs(username, database, &mut rng, x, x_pub);
         let next_step = AuCPaceServerCPaceSubstep::new(self.ssid, prs, rng);
 
         (next_step, message)
     }
 
-    fn generate_prs<U, DB, CSPRNG>(
-        &self,
+    /// Accept the user's username and generate the ClientInfo for the response.
+    /// Moves the protocol into the CPace substep phase
+    ///
+    /// This method performs the "partial augmentation" variant of the protocol
+    ///
+    /// # Arguments:
+    /// - `username`: the client's username
+    /// - `database`: the password verifier database to retrieve the client's information from
+    ///    This is a PartialAugDatabase so we can lookup the server's long term keypair.
+    ///
+    /// # Return:
+    /// (`next_step`, `message`)
+    /// - `next_step`: the server in the CPace substep stage
+    /// - `messsage`: the message to send to the client
+    ///
+    #[cfg(feature = "partial_augmentation")]
+    pub fn lookup_client_info<U, DB, CSPRNG>(
+        self,
         username: U,
+        database: &DB,
+        mut rng: CSPRNG,
+    ) -> (
+        AuCPaceServerCPaceSubstep<D, CSPRNG, K1>,
+        ServerMessage<'static, K1>,
+    )
+    where
+        U: AsRef<[u8]>,
+        DB: PartialAugDatabase<
+            PasswordVerifier = RistrettoPoint,
+            PrivateKey = Scalar,
+            PublicKey = RistrettoPoint,
+        >,
+        CSPRNG: RngCore + CryptoRng,
+    {
+        let user = username.as_ref();
+        let (prs, message) = if let Some((x_pub, x)) = database.lookup_long_term_keypair(user) {
+            // generate the prs and client message
+            self.generate_prs(user, database, &mut rng, x, x_pub)
+        } else {
+            // if the user does not have a keypair stored then we generate a random point on the
+            // curve to be the public key, and handle the failed lookup as normal
+            let x_pub = RistrettoPoint::random(&mut rng);
+            self.lookup_failed(x_pub, &mut rng)
+        };
+        let next_step = AuCPaceServerCPaceSubstep::new(self.ssid, prs, rng);
+
+        (next_step, message)
+    }
+
+    /// Generate the Password Related String (PRS) and the message to be sent to the user.
+    fn generate_prs<DB, CSPRNG>(
+        &self,
+        username: &[u8],
         database: &DB,
         rng: &mut CSPRNG,
         x: Scalar,
         x_pub: RistrettoPoint,
     ) -> ([u8; 32], ServerMessage<'static, K1>)
     where
-        U: AsRef<[u8]>,
         DB: Database<PasswordVerifier = RistrettoPoint>,
         CSPRNG: RngCore + CryptoRng,
     {
-        // generate the password related string (PRS) and the client info
-        let prs;
-        let message;
         if let Some((w, salt, sigma)) = database.lookup_verifier(username.as_ref()) {
             prs = (w * x).compress().to_bytes();
             message = ServerMessage::AugmentationInfo {
@@ -222,34 +271,46 @@ where
                 salt,
                 pbkdf_params: sigma,
             };
+            (prs, message)
         } else {
-            // generate a random PRS
-            // TODO: would it be better to generate this via RistrettoPoint::random
-            prs = {
-                let mut tmp = [0u8; 32];
-                rng.fill_bytes(&mut tmp);
-                tmp
-            };
+            // handle the failure case
+            self.lookup_failed(x_pub, rng)
+        }
+    }
 
-            // generate the salt from the hash of the server secret and the user's name
-            let mut hasher: D = Default::default();
-            hasher.update(self.secret.0.to_le_bytes());
-            hasher.update(username);
-            let hash = hasher.finalize();
-            let hash_bytes: &[u8] = hash.as_ref();
+    /// Generate the message for if the lookup failed
+    fn lookup_failed<CSPRNG>(
+        &self,
+        x_pub: RistrettoPoint,
+        &mut rng: CSPRNG,
+    ) -> ([u8; 32], ServerMessage<K1>)
+    where
+        CSPRNG: RngCore + CryptoRng,
+    {
+        let prs = {
+            let mut tmp = [0u8; 32];
+            rng.fill_bytes(&mut tmp);
+            tmp
+        };
 
-            // It is okay to expect here because SaltString has a buffer of 64 bytes by requirement
-            // from the PHC spec. 48 bytes of data when encoded as base64 transform to 64 bytes.
-            // This gives us the most entropy possible from the hash in the SaltString.
-            let salt = SaltString::b64_encode(&hash_bytes[..48])
-                .expect("SaltString maximum length invariant broken");
+        // generate the salt from the hash of the server secret and the user's name
+        let mut hasher: D = Default::default();
+        hasher.update(self.secret.0.to_le_bytes());
+        hasher.update(username);
+        let hash = hasher.finalize();
+        let hash_bytes: &[u8] = hash.as_ref();
 
-            message = ServerMessage::AugmentationInfo {
-                group: "ristretto255",
-                x_pub,
-                salt,
-                pbkdf_params: Default::default(),
-            };
+        // It is okay to expect here because SaltString has a buffer of 64 bytes by requirement
+        // from the PHC spec. 48 bytes of data when encoded as base64 transform to 64 bytes.
+        // This gives us the most entropy possible from the hash in the SaltString.
+        let salt = SaltString::b64_encode(&hash_bytes[..48])
+            .expect("SaltString maximum length invariant broken");
+
+        let message = ServerMessage::AugmentationInfo {
+            group: "ristretto255",
+            x_pub,
+            salt,
+            pbkdf_params: Default::default(),
         };
 
         (prs, message)

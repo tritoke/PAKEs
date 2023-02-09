@@ -57,6 +57,8 @@ pub trait PartialAugDatabase: Database {
     ///
     /// # Return:
     /// - Some((`public_key`, `private_key`)): if the user has a long term keypair associated with them
+    ///   - `private_key`: corresponds to x from the protocol definition
+    ///   - `public_key`: corresponds to x_pub from the protocol definition
     /// - None: if the user has no associated keypair
     ///
     fn lookup_long_term_keypair(
