@@ -18,7 +18,7 @@ pub enum Error {
     /// The SSID provided is too short to be secure, SSIDs must be at least 16 bytes long
     /// Note: this error can only occur if the SSID establishment phase is bypassed
     InsecureSsid,
-    /// This error happens when a long term keypair for a user is stored in a PartialAugDatabase
+    /// This error happens when a long term keypair for a user is stored in a [`PartialAugDatabase`](crate::PartialAugDatabase)
     /// but the user doesn't exist, this operation has no meaning and as such is an error.
     #[cfg(feature = "partial_augmentation")]
     UserNotRegistered,

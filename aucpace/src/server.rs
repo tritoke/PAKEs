@@ -65,9 +65,9 @@ where
     /// Create a new server in the SSID agreement phase
     ///
     /// # Return:
-    /// (`next_step`, `message`)
-    /// - `next_step`: the server in the SSID establishment stage
-    /// - `messsage`: the message to send to the server
+    /// ([`next_step`](AuCPaceServerSsidEstablish), [`message`](ServerMessage::Nonce))
+    /// - [`next_step`](AuCPaceServerSsidEstablish): the server in the SSID establishment stage
+    /// - [`message`](ServerMessage::Nonce): the message to send to the server
     ///
     pub fn begin(
         &mut self,
@@ -86,8 +86,8 @@ where
     /// `ssid`: Some data to be hashed and act as the sub-session ID
     ///
     /// # Return:
-    /// - Ok(`next_step`): the server in the SSID establishment stage
-    /// - Err(Error::InsecureSsid): the SSID provided was not long enough to be secure
+    /// - Ok([`next_step`](AuCPaceServerAugLayer)): the server in the SSID establishment stage
+    /// - Err([`Error::InsecureSsid`](Error::InsecureSsid)): the SSID provided was not long enough to be secure
     ///
     pub fn begin_prestablished_ssid<S>(&mut self, ssid: S) -> Result<AuCPaceServerAugLayer<D, K1>>
     where
@@ -110,6 +110,10 @@ where
     ///
     /// This is inteded to be used when registering a user when using partial augmentation.
     /// As well as on all password changes.
+    ///
+    /// # Return:
+    /// (`private_key`, `public_key`):
+    /// - `private_key`: the private key
     ///
     #[cfg(feature = "partial_augmentation")]
     pub fn generate_long_term_keypair(&mut self) -> (Scalar, RistrettoPoint) {
@@ -148,7 +152,7 @@ where
     /// - `client_nonce` - the nonce received from the server
     ///
     /// # return:
-    /// `next_step`: the server in the augmentation layer
+    /// [`next_step`](AuCPaceServerAugLayer): the server in the augmentation layer
     ///
     pub fn agree_ssid(self, client_nonce: [u8; K1]) -> AuCPaceServerAugLayer<D, K1> {
         let ssid = compute_ssid::<D, K1>(self.nonce, client_nonce);
@@ -181,9 +185,9 @@ where
     /// - `database`: the password verifier database to retrieve the client's information from
     ///
     /// # Return:
-    /// (`next_step`, `message`)
-    /// - `next_step`: the server in the CPace substep stage
-    /// - `messsage`: the message to send to the client
+    /// ([`next_step`](AuCPaceServerCPaceSubstep), [`message`](ServerMessage::AugmentationInfo))
+    /// - [`next_step`](AuCPaceServerCPaceSubstep): the server in the CPace substep stage
+    /// - [`message`](ServerMessage::AugmentationInfo): the message to send to the client
     ///
     pub fn generate_client_info<U, DB, CSPRNG>(
         self,
@@ -224,9 +228,9 @@ where
     ///    This is a PartialAugDatabase so we can lookup the server's long term keypair.
     ///
     /// # Return:
-    /// (`next_step`, `message`)
-    /// - `next_step`: the server in the CPace substep stage
-    /// - `messsage`: the message to send to the client
+    /// ([`next_step`](AuCPaceServerCPaceSubstep), [`message`](ServerMessage::AugmentationInfo))
+    /// - [`next_step`](AuCPaceServerCPaceSubstep): the server in the CPace substep stage
+    /// - [`message`](ServerMessage::AugmentationInfo): the message to send to the client
     ///
     #[cfg(feature = "partial_augmentation")]
     pub fn generate_client_info_partial_aug<U, DB, CSPRNG>(
@@ -361,9 +365,9 @@ where
     /// - `rng` - the CSPRNG used when generating the public/private keypair
     ///
     /// # Return:
-    /// (`next_step`, `message`)
-    /// - `next_step`: the server waiting for the client's public key
-    /// - `message`: the message to send to the client
+    /// ([`next_step`](AuCPaceServerRecvClientKey), [`messsage`](ServerMessage::PublicKey))
+    /// - [`next_step`](AuCPaceServerRecvClientKey): the server waiting for the client's public key
+    /// - [`messsage`](ServerMessage::PublicKey): the message to send to the client
     ///
     pub fn generate_public_key<CI: AsRef<[u8]>>(
         mut self,
@@ -410,7 +414,7 @@ where
     /// - `client_pubkey` - the client's public key
     ///
     /// # Return:
-    /// `next_step`: the server in the Explicit Mutual Authentication phase
+    /// [`next_step`](AuCPaceServerExpMutAuth): the server in the Explicit Mutual Authentication phase
     ///
     pub fn receive_client_pubkey(
         self,
@@ -464,8 +468,8 @@ where
     /// either:
     /// - Ok((`sk`, `message`)):
     ///     - `sk` - the session key reached by the AuCPace protocol
-    ///     - `message` - the message to send to the client
-    /// - Err(Error::MutualAuthFail): an error if the authenticator we computed doesn't match
+    ///     - [`message`](ServerMessage::Authenticator) - the message to send to the client
+    /// - Err([`Error::MutualAuthFail`](Error::MutualAuthFail)): an error if the authenticator we computed doesn't match
     ///     the client's authenticator, compared in constant time.
     ///
     pub fn receive_client_authenticator(

@@ -56,9 +56,9 @@ where
     /// Create a new client in the SSID agreement phase
     ///
     /// # Return:
-    /// (`next_step`, `message`)
-    /// - `next_step`: the client in the SSID establishment stage
-    /// - `messsage`: the message to send to the server
+    /// ([`next_step`](AuCPaceClientSsidEstablish), [`message`](ClientMessage::Nonce))
+    /// - [`next_step`](AuCPaceClientSsidEstablish): the client in the SSID establishment stage
+    /// - [`message`](ClientMessage::Nonce): the message to send to the server
     ///
     pub fn begin(&mut self) -> (AuCPaceClientSsidEstablish<D, H, K1>, ClientMessage<'_, K1>) {
         let next_step = AuCPaceClientSsidEstablish::new(&mut self.rng);
@@ -73,8 +73,8 @@ where
     /// - `ssid`: Some data to be hashed and act as the sub-session ID
     ///
     /// # Return:
-    /// - Ok(`next_step`): the server in the SSID establishment stage
-    /// - Err(Error::InsecureSsid): the SSID provided was not long enough to be secure
+    /// - Ok([`next_step`](AuCPaceClientSsidEstablish)): the server in the SSID establishment stage
+    /// - Err([`Error::InsecureSsid`](Error::InsecureSsid)): the SSID provided was not long enough to be secure
     ///
     pub fn begin_prestablished_ssid<S>(&mut self, ssid: S) -> Result<AuCPaceClientPreAug<D, H, K1>>
     where
@@ -107,9 +107,9 @@ where
     ///   e.g. if you have a username limit of 20 and password limit of 60, 81 would be the right value.
     ///
     /// # Return:
-    /// (`next_step`, `message`)
-    /// - `next_step`: the client in the SSID establishment stage
-    /// - `messsage`: the message to send to the server
+    /// - Ok([`messsage`](ClientMessage::Registration)): the message to send to the server
+    /// - Err([`Error::PasswordHashing`](Error::PasswordHashing) | [`Error::HashEmpty`](Error::HashEmpty) | [`Error::HashSizeInvalid`](Error::HashSizeInvalid)):
+    ///   one of the three error variants that can result from the password hashing process
     ///
     pub fn register<'a, P, const BUFSIZ: usize>(
         &mut self,
@@ -161,9 +161,9 @@ where
     /// - `hasher` - the hasher to use for hashing the username and password.
     ///
     /// # Return:
-    /// (`next_step`, `message`)
-    /// - `next_step`: the client in the SSID establishment stage
-    /// - `messsage`: the message to send to the server
+    /// - Ok([`messsage`](ClientMessage::Registration)): the message to send to the server
+    /// - Err([`Error::PasswordHashing`](Error::PasswordHashing) | [`Error::HashEmpty`](Error::HashEmpty) | [`Error::HashSizeInvalid`](Error::HashSizeInvalid)):
+    ///   one of the three error variants that can result from the password hashing process
     ///
     #[cfg(feature = "alloc")]
     pub fn register_alloc<'a, P>(
@@ -233,7 +233,7 @@ where
     /// - `server_nonce` - the nonce received from the server
     ///
     /// # return:
-    /// `next_step`: the client in the pre-augmentation stage
+    /// [`next_step`](AuCPaceClientPreAug): the client in the pre-augmentation stage
     ///
     pub fn agree_ssid(self, server_nonce: [u8; K1]) -> AuCPaceClientPreAug<D, H, K1> {
         let ssid = compute_ssid::<D, K1>(server_nonce, self.nonce);
@@ -269,9 +269,9 @@ where
     /// - `username` - a reference to the client's username
     ///
     /// # Return:
-    /// (`next_step`, `message`)
-    /// - `next_step`: the client in the augmentation layer
-    /// - `message`: the message to send to the server
+    /// ([`next_step`](AuCPaceClientAugLayer), [`message`](ClientMessage::Username))
+    /// - [`next_step`](AuCPaceClientAugLayer): the client in the augmentation layer
+    /// - [`message`](ClientMessage::Username): the message to send to the server
     ///
     pub fn start_augmentation(
         self,
@@ -327,10 +327,9 @@ where
     /// the username and password on the heap using Vec.
     ///
     /// # Return:
-    /// either
-    /// - ok(`next_step`): the client in the cpace substep
-    /// - err(error::passwordhashing(hasher_error) | error::hashempty | error::hashsizeinvalid):
-    ///     one of the three error variants that can result from the password hashing process
+    /// - Ok([`next_step`](AuCPaceClientCPaceSubstep)): the client in the cpace substep
+    /// - Err([`Error::PasswordHashing`](Error::PasswordHashing) | [`Error::HashEmpty`](Error::HashEmpty) | [`Error::HashSizeInvalid`](Error::HashSizeInvalid)):
+    ///   one of the three error variants that can result from the password hashing process
     ///
     pub fn generate_cpace<'salt, P, S, const BUFSIZ: usize>(
         self,
@@ -368,10 +367,9 @@ where
     /// - `hasher` - the hasher to use when computing `w`
     ///
     /// # Return:
-    /// either
-    /// - ok(`next_step`): the client in the cpace substep
-    /// - err(error::passwordhashing(hasher_error) | error::hashempty | error::hashsizeinvalid):
-    ///     one of the three error variants that can result from the password hashing process
+    /// - Ok([`next_step`](AuCPaceClientCPaceSubstep)): the client in the cpace substep
+    /// - Err([`Error::PasswordHashing`](Error::PasswordHashing) | [`Error::HashEmpty`](Error::HashEmpty) | [`Error::HashSizeInvalid`](Error::HashSizeInvalid)):
+    ///   one of the three error variants that can result from the password hashing process
     ///
     #[cfg(feature = "alloc")]
     pub fn generate_cpace_alloc<'salt, P, S>(
@@ -423,9 +421,9 @@ where
     /// - `rng` - the CSPRNG used when generating the public/private keypair
     ///
     /// # Return:
-    /// (`next_step`, `message`)
-    /// - `next_step`: the client waiting for the server's public key
-    /// - `message`: the message to send to the server
+    /// ([`next_step`](AuCPaceClientRecvServerKey), [`message`](ClientMessage::PublicKey))
+    /// - [`next_step`](AuCPaceClientRecvServerKey): the client waiting for the server's public key
+    /// - [`message`](ClientMessage::PublicKey): the message to send to the server
     ///
     pub fn generate_public_key<CI, CSPRNG>(
         self,
@@ -473,9 +471,9 @@ where
     /// - `server_pubkey` - the server's public key
     ///
     /// # Return:
-    /// (`next_step`, `message`)
-    /// - `next_step`: the client in the Explicit Mutual Authentication phase
-    /// - `message`: the message to send to the server
+    /// ([`next_step`](AuCPaceClientExpMutAuth), [`message`](ClientMessage::Authenticator))
+    /// - [`next_step`](AuCPaceClientExpMutAuth): the client in the Explicit Mutual Authentication phase
+    /// - [`message`](ClientMessage::Authenticator): the message to send to the server
     ///
     pub fn receive_server_pubkey(
         self,
@@ -540,7 +538,7 @@ where
     /// # Return:
     /// either:
     /// - Ok(`sk`): the session key reached by the AuCPace protocol
-    /// - Err(Error::MutualAuthFail): an error if the authenticator we computed doesn't match
+    /// - Err([`Error::MutualAuthFail`](Error::MutualAuthFail)): an error if the authenticator we computed doesn't match
     ///     the server's authenticator, compared in constant time.
     ///
     pub fn receive_server_authenticator(self, server_authenticator: [u8; 64]) -> Result<Output<D>> {
