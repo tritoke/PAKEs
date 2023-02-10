@@ -194,7 +194,7 @@ where
         let x_pub = RISTRETTO_BASEPOINT_POINT * x;
 
         // generate the prs and client message
-        let (prs, message) = self.generate_prs(username, database, &mut rng, x, x_pub);
+        let (prs, message) = self.generate_prs(username.as_ref(), database, &mut rng, x, x_pub);
         let next_step = AuCPaceServerCPaceSubstep::new(self.ssid, prs, rng);
 
         (next_step, message)
@@ -216,7 +216,7 @@ where
     /// - `messsage`: the message to send to the client
     ///
     #[cfg(feature = "partial_augmentation")]
-    pub fn lookup_client_info<U, DB, CSPRNG>(
+    pub fn generate_client_info_partial_aug<U, DB, CSPRNG>(
         self,
         username: U,
         database: &DB,
@@ -242,7 +242,7 @@ where
             // if the user does not have a keypair stored then we generate a random point on the
             // curve to be the public key, and handle the failed lookup as normal
             let x_pub = RistrettoPoint::random(&mut rng);
-            self.lookup_failed(x_pub, &mut rng)
+            self.lookup_failed(user, x_pub, &mut rng)
         };
         let next_step = AuCPaceServerCPaceSubstep::new(self.ssid, prs, rng);
 
@@ -263,8 +263,8 @@ where
         CSPRNG: RngCore + CryptoRng,
     {
         if let Some((w, salt, sigma)) = database.lookup_verifier(username.as_ref()) {
-            prs = (w * x).compress().to_bytes();
-            message = ServerMessage::AugmentationInfo {
+            let prs = (w * x).compress().to_bytes();
+            let message = ServerMessage::AugmentationInfo {
                 // this will have to be provided by the trait in future
                 group: "ristretto255",
                 x_pub,
@@ -274,16 +274,17 @@ where
             (prs, message)
         } else {
             // handle the failure case
-            self.lookup_failed(x_pub, rng)
+            self.lookup_failed(username, x_pub, rng)
         }
     }
 
     /// Generate the message for if the lookup failed
     fn lookup_failed<CSPRNG>(
         &self,
+        username: &[u8],
         x_pub: RistrettoPoint,
-        &mut rng: CSPRNG,
-    ) -> ([u8; 32], ServerMessage<K1>)
+        rng: &mut CSPRNG,
+    ) -> ([u8; 32], ServerMessage<'static, K1>)
     where
         CSPRNG: RngCore + CryptoRng,
     {
