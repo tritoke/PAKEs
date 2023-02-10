@@ -1,3 +1,4 @@
+use crate::Result;
 use password_hash::{ParamsString, SaltString};
 
 /// trait for AuCPace to use to abstract over the storage and retrieval of verifiers
@@ -47,8 +48,11 @@ pub trait Database {
 /// trait for AuCPace to use to abstract over the storage and retrieval of verifiers
 #[cfg(feature = "partial_augmentation")]
 pub trait PartialAugDatabase: Database {
-    type PublicKey;
+    /// The private key type
     type PrivateKey;
+
+    /// The public key type
+    type PublicKey;
 
     /// retrieve a long-term key pair from the database
     ///
@@ -64,5 +68,26 @@ pub trait PartialAugDatabase: Database {
     fn lookup_long_term_keypair(
         &self,
         username: &[u8],
-    ) -> Option<(Self::PublicKey, Self::PrivateKey)>;
+    ) -> Option<(Self::PrivateKey, Self::PublicKey)>;
+
+    /// store a long-term key pair for `username`
+    ///
+    /// This can be generated with [`AuCPaceServer::generate_long_term_keypair`](crate::AuCPaceServer::generate_long_term_keypair)
+    ///
+    /// # Arguments:
+    /// - `username`: the user the store the keypair for
+    /// - `priv_key`: the private key to store
+    /// - `pub_key`: the public key to store
+    ///
+    /// # Return:
+    /// - Ok(()): success - the keypair was stored correctly
+    /// - Err([`Error::UserNotRegistered`](crate::Error::UserNotRegistered)): failure -
+    ///    `username` is not registered and thus we cannot store a keypair for them
+    ///
+    fn store_long_term_keypair(
+        &mut self,
+        username: &[u8],
+        priv_key: Self::PrivateKey,
+        pub_key: Self::PublicKey,
+    ) -> Result<()>;
 }

@@ -1,4 +1,5 @@
 use crate::{Error, Result};
+use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
 use curve25519_dalek::{
     digest::consts::U64,
     digest::{Digest, Output},
@@ -134,6 +135,7 @@ where
 }
 
 /// Compute a scalar from a password hash
+#[inline(always)]
 pub(crate) fn scalar_from_hash(pw_hash: PasswordHash<'_>) -> Result<Scalar> {
     let hash = pw_hash.hash.ok_or(Error::HashEmpty)?;
     let hash_bytes = hash.as_bytes();
@@ -156,8 +158,22 @@ pub(crate) fn scalar_from_hash(pw_hash: PasswordHash<'_>) -> Result<Scalar> {
     }
 }
 
-// serde_with helper modules for serialising
+/// Generate a keypair (x, X) for the server
+#[inline(always)]
+pub(crate) fn generate_server_keypair<CSPRNG>(rng: &mut CSPRNG) -> (Scalar, RistrettoPoint)
+where
+    CSPRNG: RngCore + CryptoRng,
+{
+    // for ristretto255 the cofactor is 1, for normal curve25519 it is 8
+    // this will need to be provided by a group trait in the future
+    let cofactor = Scalar::one();
+    let private = Scalar::random(rng);
+    let public = RISTRETTO_BASEPOINT_POINT * (private * cofactor);
 
+    (private, public)
+}
+
+// serde_with helper modules for serialising
 #[cfg(feature = "serde")]
 pub(crate) mod serde_saltstring {
     use core::fmt;

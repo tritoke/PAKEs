@@ -18,22 +18,30 @@ pub enum Error {
     /// The SSID provided is too short to be secure, SSIDs must be at least 16 bytes long
     /// Note: this error can only occur if the SSID establishment phase is bypassed
     InsecureSsid,
+    /// This error happens when a long term keypair for a user is stored in a PartialAugDatabase
+    /// but the user doesn't exist, this operation has no meaning and as such is an error.
+    #[cfg(feature = "partial_augmentation")]
+    UserNotRegistered,
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::PasswordHashing(error) => write!(f, "Error while hashing password: {}", error),
+            Error::PasswordHashing(error) => write!(f, "error while hashing password: {}", error),
             Error::HashEmpty => write!(f, "password hash empty"),
             Error::HashSizeInvalid => write!(f, "password hash invalid, should be 32 or 64 bytes"),
             Error::MutualAuthFail => write!(
                 f,
                 "explicit mutual authentication failed, authenticators didn't match"
             ),
-            Error::UsernameOrPasswordTooLong => write!(f, "Username or password too long"),
+            Error::UsernameOrPasswordTooLong => write!(f, "username or password too long"),
             Error::InsecureSsid => write!(
                 f,
-                "Provided SSID is insecure - SSIDs must be at least 16 bytes long"
+                "provided SSID is insecure - SSIDs must be at least 16 bytes long"
+            ),
+            Error::UserNotRegistered => write!(
+                f,
+                "user must be registered before a long-term keypair can be stored"
             ),
         }
     }

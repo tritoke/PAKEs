@@ -1,5 +1,8 @@
-use aucpace::{Client, ClientMessage, Database, Result, Server, ServerMessage};
+use aucpace::{
+    Client, ClientMessage, Database, Error, PartialAugDatabase, Result, Server, ServerMessage,
+};
 use curve25519_dalek::ristretto::RistrettoPoint;
+use curve25519_dalek::scalar::Scalar;
 use password_hash::{ParamsString, SaltString};
 use rand_core::OsRng;
 use scrypt::{Params, Scrypt};
@@ -39,6 +42,7 @@ fn main() -> Result<()> {
 
     // register the user in the database
     let mut base_client = Client::new(OsRng);
+    let mut base_server = Server::new(OsRng);
     let mut database: SingleUserDatabase = Default::default();
 
     let params = Params::recommended();
@@ -51,6 +55,10 @@ fn main() -> Result<()> {
     } = registration
     {
         database.store_verifier(username, salt, None, verifier, params);
+        let (private, public) = base_server.generate_long_term_keypair();
+        database
+            .store_long_term_keypair(username, private, public)
+            .unwrap();
     }
 
     static CLIENT_BYTES_SENT: AtomicUsize = AtomicUsize::new(0);
@@ -66,7 +74,6 @@ fn main() -> Result<()> {
 
         // buffer for receiving packets
         let mut buf = [0u8; 1024];
-        let mut base_server = Server::new(OsRng);
 
         // ===== SSID Establishment =====
         let (server, message) = base_server.begin();
@@ -84,7 +91,8 @@ fn main() -> Result<()> {
         // ===== Augmentation Layer =====
         client_message = recv!(stream, buf);
         let (server, message) = if let ClientMessage::Username(username) = client_message {
-            server.generate_client_info(username, &database, OsRng)
+            // This is the only difference from the non-augmented protocol flow
+            server.generate_client_info_partial_aug(username, &database, OsRng)
         } else {
             panic!("Received invalid client message {:?}", client_message);
         };
@@ -251,6 +259,7 @@ fn main() -> Result<()> {
 struct SingleUserDatabase {
     user: Option<Vec<u8>>,
     data: Option<(RistrettoPoint, SaltString, ParamsString)>,
+    long_term_keypair: Option<(Scalar, RistrettoPoint)>,
 }
 
 impl Database for SingleUserDatabase {
@@ -276,6 +285,36 @@ impl Database for SingleUserDatabase {
     ) {
         self.user = Some(username.to_vec());
         self.data = Some((verifier, salt, params));
+    }
+}
+
+impl PartialAugDatabase for SingleUserDatabase {
+    type PrivateKey = Scalar;
+    type PublicKey = RistrettoPoint;
+
+    fn lookup_long_term_keypair(
+        &self,
+        username: &[u8],
+    ) -> Option<(Self::PrivateKey, Self::PublicKey)> {
+        match &self.user {
+            Some(stored_user) if stored_user == username => self.long_term_keypair.clone(),
+            _ => None,
+        }
+    }
+
+    fn store_long_term_keypair(
+        &mut self,
+        username: &[u8],
+        priv_key: Self::PrivateKey,
+        pub_key: Self::PublicKey,
+    ) -> Result<()> {
+        match &self.user {
+            Some(stored_user) if stored_user == username => {
+                self.long_term_keypair = Some((priv_key, pub_key));
+                Ok(())
+            }
+            _ => Err(Error::UserNotRegistered),
+        }
     }
 }
 

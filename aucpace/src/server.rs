@@ -2,12 +2,11 @@ use crate::constants::MIN_SSID_LEN;
 use crate::database::Database;
 use crate::utils::{
     compute_authenticator_messages, compute_first_session_key, compute_session_key, compute_ssid,
-    generate_keypair, generate_nonce, H0,
+    generate_keypair, generate_nonce, generate_server_keypair, H0,
 };
 use crate::{Error, Result};
 use core::marker::PhantomData;
 use curve25519_dalek::{
-    constants::RISTRETTO_BASEPOINT_POINT,
     digest::consts::U64,
     digest::{Digest, Output},
     ristretto::RistrettoPoint,
@@ -19,6 +18,9 @@ use subtle::ConstantTimeEq;
 
 #[cfg(feature = "partial_augmentation")]
 use crate::database::PartialAugDatabase;
+
+#[cfg(feature = "serde")]
+use crate::utils::{serde_paramsstring, serde_saltstring};
 
 /// A non-copy wrapper around u64
 #[derive(Clone)]
@@ -81,7 +83,7 @@ where
     /// Create a new server in the Augmentation layer phase, provided an SSID
     ///
     /// # Argument:
-    /// - `ssid`: Some data to be hashed and act as the sub-session ID
+    /// `ssid`: Some data to be hashed and act as the sub-session ID
     ///
     /// # Return:
     /// - Ok(`next_step`): the server in the SSID establishment stage
@@ -102,6 +104,16 @@ where
         let ssid_hash = hasher.finalize();
         let next_step = AuCPaceServerAugLayer::new(self.secret.clone(), ssid_hash);
         Ok(next_step)
+    }
+
+    /// Generate a new long-term keypair
+    ///
+    /// This is inteded to be used when registering a user when using partial augmentation.
+    /// As well as on all password changes.
+    ///
+    #[cfg(feature = "partial_augmentation")]
+    pub fn generate_long_term_keypair(&mut self) -> (Scalar, RistrettoPoint) {
+        generate_server_keypair(&mut self.rng)
     }
 }
 
@@ -187,11 +199,7 @@ where
         DB: Database<PasswordVerifier = RistrettoPoint>,
         CSPRNG: RngCore + CryptoRng,
     {
-        // for ristretto255 the cofactor is 1, for normal curve25519 it is 8
-        // this will need to be provided by a group trait in the future
-        let cofactor = Scalar::one();
-        let x = Scalar::random(&mut rng) * cofactor;
-        let x_pub = RISTRETTO_BASEPOINT_POINT * x;
+        let (x, x_pub) = generate_server_keypair(&mut rng);
 
         // generate the prs and client message
         let (prs, message) = self.generate_prs(username.as_ref(), database, &mut rng, x, x_pub);
@@ -203,7 +211,12 @@ where
     /// Accept the user's username and generate the ClientInfo for the response.
     /// Moves the protocol into the CPace substep phase
     ///
-    /// This method performs the "partial augmentation" variant of the protocol
+    /// This method performs the "partial augmentation" variant of the protocol.
+    /// This means that instead of generating x and x_pub as ephemeral keys, a long term keypair is
+    /// retrieved from the database instead. This comes with decreased security in the case of
+    /// server compromise but significantly decreases the amount of computation the server has to
+    /// do. The reference paper goes into more detail on the tradeoffs and why you might choose to
+    /// use this method.
     ///
     /// # Arguments:
     /// - `username`: the client's username
@@ -235,7 +248,7 @@ where
         CSPRNG: RngCore + CryptoRng,
     {
         let user = username.as_ref();
-        let (prs, message) = if let Some((x_pub, x)) = database.lookup_long_term_keypair(user) {
+        let (prs, message) = if let Some((x, x_pub)) = database.lookup_long_term_keypair(user) {
             // generate the prs and client message
             self.generate_prs(user, database, &mut rng, x, x_pub)
         } else {
@@ -473,9 +486,6 @@ where
         }
     }
 }
-
-#[cfg(feature = "serde")]
-use crate::utils::{serde_paramsstring, serde_saltstring};
 
 /// An enum representing the different messages the server can send to the client
 #[cfg_attr(

@@ -97,19 +97,15 @@ pub mod server;
 /// Module contains constants used in the code
 pub mod constants;
 
-#[rustfmt::skip]
 pub use self::{
-    client::{
-        AuCPaceClient,
-        ClientMessage,
-    },
-    server::{
-        AuCPaceServer,
-        ServerMessage,
-    },
+    client::{AuCPaceClient, ClientMessage},
     database::Database,
-    errors::{ Error, Result },
+    errors::{Error, Result},
+    server::{AuCPaceServer, ServerMessage},
 };
+
+#[cfg(feature = "partial_augmentation")]
+pub use self::database::PartialAugDatabase;
 
 /// Default Server instantiation with SHA512, OsRng and a nonce size of 16 bytes
 #[cfg(feature = "default")]
