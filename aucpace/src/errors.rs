@@ -39,6 +39,7 @@ impl fmt::Display for Error {
                 f,
                 "provided SSID is insecure - SSIDs must be at least 16 bytes long"
             ),
+            #[cfg(feature = "partial_augmentation")]
             Error::UserNotRegistered => write!(
                 f,
                 "user must be registered before a long-term keypair can be stored"
