@@ -107,6 +107,9 @@ pub use self::{
 #[cfg(feature = "partial_augmentation")]
 pub use self::database::PartialAugDatabase;
 
+#[cfg(feature = "strong_aucpace")]
+pub use self::database::StrongDatabase;
+
 /// Default Server instantiation with SHA512, OsRng and a nonce size of 16 bytes
 #[cfg(feature = "default")]
 pub type Server = AuCPaceServer<sha2::Sha512, rand_core::OsRng, 16>;

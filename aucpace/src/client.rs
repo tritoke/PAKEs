@@ -1,6 +1,6 @@
 use crate::utils::{
     compute_authenticator_messages, compute_first_session_key, compute_session_key, generate_nonce,
-    scalar_from_hash, H0,
+    scalar_from_hash, H0, H1,
 };
 use crate::{
     errors::{Error, Result},
@@ -145,6 +145,71 @@ where
         Ok(ClientMessage::Registration {
             username,
             salt: salt_string,
+            params: params_string,
+            verifier,
+        })
+    }
+
+    /// Register a username/password in the strong variant of the protocol
+    ///
+    /// # Arguments:
+    /// - `username` - the username to register with
+    /// - `password` - the password for the user
+    /// - `params` - the parameters of the PBKDF used
+    /// - `hasher` - the hasher to use for hashing the username and password.
+    ///
+    /// # Const Parameters
+    /// - `BUFSIZ` - the size of the buffer to use while hashing
+    ///   it should be enough to store the maximum length of a username + password + 1 for your use case
+    ///   e.g. if you have a username limit of 20 and password limit of 60, 81 would be the right value.
+    ///
+    /// # Return:
+    /// - Ok([`messsage`](ClientMessage::Registration)): the message to send to the server
+    /// - Err([`Error::PasswordHashing`](Error::PasswordHashing) | [`Error::HashEmpty`](Error::HashEmpty) | [`Error::HashSizeInvalid`](Error::HashSizeInvalid)):
+    ///   one of the three error variants that can result from the password hashing process
+    ///
+    pub fn register_strong<'a, P, const BUFSIZ: usize>(
+        &mut self,
+        username: &'a [u8],
+        password: P,
+        params: H::Params,
+        hasher: H,
+    ) -> Result<ClientMessage<'a, K1>>
+    where
+        P: AsRef<[u8]>,
+    {
+        // choose a random q
+        let q = Scalar::random(&mut self.rng);
+
+        // compute z
+        let mut hasher1: D = H1();
+        hasher1.update(username);
+        hasher1.update(password.as_ref());
+        let z = RistrettoPoint::from_hash(hasher1);
+
+        // compute the salt value
+        let cofactor = Scalar::one();
+        let salt_point = z * (q * cofactor);
+        let salt = salt_point.compress().to_bytes();
+        let salt_string = SaltString::b64_encode(&salt).map_err(Error::PasswordHashing)?;
+
+        // compute the verifier W
+        let pw_hash = hash_password::<&[u8], P, &SaltString, H, BUFSIZ>(
+            username,
+            password,
+            &salt_string,
+            params.clone(),
+            hasher,
+        )?;
+        let w = scalar_from_hash(pw_hash)?;
+        let verifier = RISTRETTO_BASEPOINT_POINT * (w * cofactor);
+
+        // attempt to convert the parameters to a ParamsString
+        let params_string = params.try_into().map_err(Error::PasswordHashing)?;
+
+        Ok(ClientMessage::StrongRegistration {
+            username,
+            secret_exponent: q,
             params: params_string,
             verifier,
         })
@@ -647,6 +712,23 @@ pub enum ClientMessage<'a, const K1: usize> {
         /// The salt used when computing the verifier
         #[cfg_attr(feature = "serde", serde(with = "serde_saltstring"))]
         salt: SaltString,
+
+        /// The password hasher's parameters used when computing the verifier
+        #[cfg_attr(feature = "serde", serde(with = "serde_paramsstring"))]
+        params: ParamsString,
+
+        /// The verifier computer from the user's password
+        verifier: RistrettoPoint,
+    },
+
+    /// Registration Strong version - the username, verifier, secret exponent and parameters needed for registering a user
+    /// NOTE: if the UAD field is desired this should be handled separately and sent at the same time
+    StrongRegistration {
+        /// The username of whoever is registering
+        username: &'a [u8],
+
+        /// The salt used when computing the verifier
+        secret_exponent: Scalar,
 
         /// The password hasher's parameters used when computing the verifier
         #[cfg_attr(feature = "serde", serde(with = "serde_paramsstring"))]

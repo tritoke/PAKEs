@@ -1,9 +1,9 @@
 use crate::constants::MIN_SSID_LEN;
-use crate::database::Database;
 use crate::utils::{
     compute_authenticator_messages, compute_first_session_key, compute_session_key, compute_ssid,
     generate_keypair, generate_nonce, generate_server_keypair, H0,
 };
+use crate::Database;
 use crate::{Error, Result};
 use core::marker::PhantomData;
 use curve25519_dalek::{
@@ -18,6 +18,9 @@ use subtle::ConstantTimeEq;
 
 #[cfg(feature = "partial_augmentation")]
 use crate::database::PartialAugDatabase;
+
+#[cfg(feature = "strong_aucpace")]
+use crate::database::StrongDatabase;
 
 #[cfg(feature = "serde")]
 use crate::utils::{serde_paramsstring, serde_saltstring};
@@ -114,6 +117,7 @@ where
     /// # Return:
     /// (`private_key`, `public_key`):
     /// - `private_key`: the private key
+    /// - `public_key`: the public key
     ///
     #[cfg(feature = "partial_augmentation")]
     pub fn generate_long_term_keypair(&mut self) -> (Scalar, RistrettoPoint) {
@@ -244,17 +248,108 @@ where
     )
     where
         U: AsRef<[u8]>,
-        DB: PartialAugDatabase<
-            PasswordVerifier = RistrettoPoint,
-            PrivateKey = Scalar,
-            PublicKey = RistrettoPoint,
-        >,
+        DB: Database<PasswordVerifier = RistrettoPoint>
+            + PartialAugDatabase<PrivateKey = Scalar, PublicKey = RistrettoPoint>,
         CSPRNG: RngCore + CryptoRng,
     {
         let user = username.as_ref();
         let (prs, message) = if let Some((x, x_pub)) = database.lookup_long_term_keypair(user) {
             // generate the prs and client message
             self.generate_prs(user, database, &mut rng, x, x_pub)
+        } else {
+            // if the user does not have a keypair stored then we generate a random point on the
+            // curve to be the public key, and handle the failed lookup as normal
+            let x_pub = RistrettoPoint::random(&mut rng);
+            self.lookup_failed(user, x_pub, &mut rng)
+        };
+        let next_step = AuCPaceServerCPaceSubstep::new(self.ssid, prs, rng);
+
+        (next_step, message)
+    }
+
+    /// Accept the user's username, and blinded point U and generate the ClientInfo for the response.
+    /// Moves the protocol into the CPace substep phase
+    ///
+    /// This method performs the Strong variant of the protocol.
+    /// This means that the information is blinded in transit so that it is impossible to do any
+    /// precomputation to attack the user's password before the actual verifier database is compromised.
+    ///
+    /// # Arguments:
+    /// - `username`: the client's username
+    /// - `blinded`: the client's blinded point `U`
+    /// - `database`: the password verifier database to retrieve the client's information from
+    ///    This is a PartialAugDatabase so we can lookup the server's long term keypair.
+    ///
+    /// # Return:
+    /// ([`next_step`](AuCPaceServerCPaceSubstep), [`message`](ServerMessage::AugmentationInfo))
+    /// - [`next_step`](AuCPaceServerCPaceSubstep): the server in the CPace substep stage
+    /// - [`message`](ServerMessage::AugmentationInfo): the message to send to the client
+    ///
+    #[cfg(feature = "strong_aucpace")]
+    pub fn generate_client_info_strong<U, DB, CSPRNG>(
+        self,
+        username: U,
+        blinded: RistrettoPoint,
+        database: &DB,
+        mut rng: CSPRNG,
+    ) -> (
+        AuCPaceServerCPaceSubstep<D, CSPRNG, K1>,
+        ServerMessage<'static, K1>,
+    )
+    where
+        U: AsRef<[u8]>,
+        DB: StrongDatabase<PasswordVerifier = RistrettoPoint, Exponent = RistrettoPoint>,
+        CSPRNG: RngCore + CryptoRng,
+    {
+        let (x, x_pub) = generate_server_keypair(&mut rng);
+
+        // generate the prs and client message
+        let (prs, message) =
+            self.generate_prs_strong(username.as_ref(), blinded, database, &mut rng, x, x_pub);
+        let next_step = AuCPaceServerCPaceSubstep::new(self.ssid, prs, rng);
+
+        (next_step, message)
+    }
+
+    /// Accept the user's username, and blinded point U and generate the ClientInfo for the response.
+    /// Moves the protocol into the CPace substep phase
+    ///
+    /// This method performs the Strong + Partially augmented variant of the protocol.
+    /// This means that the information is blinded in transit so that it is impossible to do any
+    /// precomputation to attack the user's password before the actual verifier database is compromised.
+    /// And that the server looks up the user's long term keypair in the database instead of generating it.
+    ///
+    /// # Arguments:
+    /// - `username`: the client's username
+    /// - `blinded`: the client's blinded point `U`
+    /// - `database`: the password verifier database to retrieve the client's information from
+    ///    This is a PartialAugDatabase so we can lookup the server's long term keypair.
+    ///
+    /// # Return:
+    /// ([`next_step`](AuCPaceServerCPaceSubstep), [`message`](ServerMessage::AugmentationInfo))
+    /// - [`next_step`](AuCPaceServerCPaceSubstep): the server in the CPace substep stage
+    /// - [`message`](ServerMessage::AugmentationInfo): the message to send to the client
+    ///
+    #[cfg(all(feature = "strong_aucpace", feature = "partial_augmentation"))]
+    pub fn generate_client_info_partial_strong<U, DB, CSPRNG>(
+        self,
+        username: U,
+        blinded: RistrettoPoint,
+        database: &DB,
+        mut rng: CSPRNG,
+    ) -> (
+        AuCPaceServerCPaceSubstep<D, CSPRNG, K1>,
+        ServerMessage<'static, K1>,
+    )
+    where
+        U: AsRef<[u8]>,
+        DB: StrongDatabase<PasswordVerifier = RistrettoPoint, Exponent = RistrettoPoint>,
+        CSPRNG: RngCore + CryptoRng,
+    {
+        let user = username.as_ref();
+        let (prs, message) = if let Some((x, x_pub)) = database.lookup_long_term_keypair(user) {
+            // generate the prs and client message
+            self.generate_prs_strong(user, blinded, database, &mut rng, x, x_pub)
         } else {
             // if the user does not have a keypair stored then we generate a random point on the
             // curve to be the public key, and handle the failed lookup as normal
@@ -280,12 +375,47 @@ where
         CSPRNG: RngCore + CryptoRng,
     {
         if let Some((w, salt, sigma)) = database.lookup_verifier(username.as_ref()) {
-            let prs = (w * x).compress().to_bytes();
+            let cofactor = Scalar::one();
+            let prs = (w * x * cofactor).compress().to_bytes();
             let message = ServerMessage::AugmentationInfo {
                 // this will have to be provided by the trait in future
                 group: "ristretto255",
                 x_pub,
                 salt,
+                pbkdf_params: sigma,
+            };
+            (prs, message)
+        } else {
+            // handle the failure case
+            self.lookup_failed(username, x_pub, rng)
+        }
+    }
+
+    /// Generate the Password Related String (PRS) and the message to be sent to the user.
+    /// This variant uses a strong database
+    #[cfg(feature = "strong_aucpace")]
+    fn generate_prs_strong<DB, CSPRNG>(
+        &self,
+        username: &[u8],
+        blinded: RistrettoPoint,
+        database: &DB,
+        rng: &mut CSPRNG,
+        x: Scalar,
+        x_pub: RistrettoPoint,
+    ) -> ([u8; 32], ServerMessage<'static, K1>)
+    where
+        DB: StrongDatabase<PasswordVerifier = RistrettoPoint, Exponent = Scalar>,
+        CSPRNG: RngCore + CryptoRng,
+    {
+        if let Some((w, q, sigma)) = database.lookup_verifier_strong(username.as_ref()) {
+            let cofactor = Scalar::one();
+            let prs = (w * (x * cofactor)).compress().to_bytes();
+            let uq = blinded * (q * cofactor);
+            let message = ServerMessage::StrongAugmentationInfo {
+                // this will have to be provided by the trait in future
+                group: "ristretto255",
+                x_pub,
+                blinded_salt: uq,
                 pbkdf_params: sigma,
             };
             (prs, message)
@@ -513,6 +643,23 @@ pub enum ServerMessage<'a, const K1: usize> {
         /// the salt used with the PBKDF
         #[cfg_attr(feature = "serde", serde(with = "serde_saltstring"))]
         salt: SaltString,
+
+        /// the parameters for the PBKDF used - sigma from the protocol definition
+        #[cfg_attr(feature = "serde", serde(with = "serde_paramsstring"))]
+        pbkdf_params: ParamsString,
+    },
+
+    /// Information required for the AuCPace Augmentation layer sub-step
+    #[cfg(feature = "strong_aucpace")]
+    StrongAugmentationInfo {
+        /// J from the protocol definition
+        group: &'a str,
+
+        /// X from the protocol definition
+        x_pub: RistrettoPoint,
+
+        /// the blinded salt used with the PBKDF
+        blinded_salt: RistrettoPoint,
 
         /// the parameters for the PBKDF used - sigma from the protocol definition
         #[cfg_attr(feature = "serde", serde(with = "serde_paramsstring"))]

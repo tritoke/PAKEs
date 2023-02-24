@@ -1,3 +1,4 @@
+#[cfg(feature = "partial_augmentation")]
 use crate::Result;
 use password_hash::{ParamsString, SaltString};
 
@@ -23,7 +24,7 @@ pub trait Database {
 
     /// store a username, salt, verifier and hash parameters to the database
     /// Verification is performed by the server and credentials will only be stored once verified.
-    /// This function should all for overwriting users credentials if they exist.
+    /// This function should allow for overwriting users credentials if they exist.
     /// This is required for password changes and will only be performed when appropriate by the
     ///
     /// # Arguments:
@@ -47,7 +48,7 @@ pub trait Database {
 
 /// trait for AuCPace to use to abstract over the storage and retrieval of verifiers
 #[cfg(feature = "partial_augmentation")]
-pub trait PartialAugDatabase: Database {
+pub trait PartialAugDatabase {
     /// The private key type
     type PrivateKey;
 
@@ -90,4 +91,52 @@ pub trait PartialAugDatabase: Database {
         priv_key: Self::PrivateKey,
         pub_key: Self::PublicKey,
     ) -> Result<()>;
+}
+
+/// trait for AuCPace to use to abstract over the storage and retrieval of verifiers
+#[cfg(feature = "strong_aucpace")]
+pub trait StrongDatabase {
+    /// The type of password verifier stored in the database
+    type PasswordVerifier;
+
+    /// The type of the secret exponent `q` stored in the database
+    type Exponent;
+
+    /// perform LookupW, returning the password verifier W, and secret exponent q if it exists
+    ///
+    /// # Arguments:
+    /// `username`: the user the lookup the verifier for
+    ///
+    /// # Return:
+    /// `(password verifier, secret exponent, salt, sigma)`:
+    /// - `password verifier`: is the verifier stored for the given user
+    /// - `secret exponent`: the value of `q` stored for the given user
+    /// - `params`: is the parameters used by the the PBKDF when hashing the user's password
+    fn lookup_verifier_strong(
+        &self,
+        username: &[u8],
+    ) -> Option<(Self::PasswordVerifier, Self::Exponent, ParamsString)>;
+
+    /// store a username, secret exponent, verifier and hash parameters to the database
+    /// Verification is performed by the server and credentials will only be stored once verified.
+    /// This function should allow for overwriting users credentials if they exist.
+    /// This is required for password changes and will only be performed when appropriate by the
+    ///
+    /// # Arguments:
+    /// - `username`: The name of the user who is storing a verifier
+    /// - `uad`: Optional - User Attached Data - "represents application data associated with
+    ///          this specific user account, e.g. specifying the granted authorization level
+    ///          on the server."
+    /// - `verifier`: The password verifier for the given user
+    /// - `secret exponent`: the value of `q` stored for the given user
+    /// - `params`: The parameters used when hashing the password into the verifier -
+    ///             It is called sigma in the protocol defionition
+    fn store_verifier_strong(
+        &mut self,
+        username: &[u8],
+        uad: Option<&[u8]>,
+        verifier: Self::PasswordVerifier,
+        secret_exponent: Self::Exponent,
+        params: ParamsString,
+    );
 }
