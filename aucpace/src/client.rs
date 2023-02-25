@@ -450,7 +450,13 @@ where
         CSPRNG: RngCore + CryptoRng,
     {
         // compute the blinding value and blind the hash of the username and password
-        let blinding_value = Scalar::random(rng);
+        // ensuring that it is non-zero as required by `invert`
+        let blinding_value = loop {
+            let val = Scalar::random(rng);
+            if val != Scalar::zero() {
+                break val;
+            }
+        };
         let mut hasher: D = H1();
         hasher.update(username);
         hasher.update(password);
@@ -801,7 +807,6 @@ where
         self,
         server_pubkey: RistrettoPoint,
     ) -> (AuCPaceClientExpMutAuth<D, K1>, ClientMessage<'static, K1>) {
-        // TODO: verify the server pubkey here - how??
         let sk1 = compute_first_session_key::<D>(self.ssid, self.priv_key, server_pubkey);
         let (ta, tb) = compute_authenticator_messages::<D>(self.ssid, sk1);
         let next_step = AuCPaceClientExpMutAuth::new(self.ssid, sk1, ta);

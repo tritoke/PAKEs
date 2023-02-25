@@ -586,7 +586,6 @@ where
         self,
         client_pubkey: RistrettoPoint,
     ) -> AuCPaceServerExpMutAuth<D, K1> {
-        // TODO: verify the client pubkey here - how??
         let sk1 = compute_first_session_key::<D>(self.ssid, self.priv_key, client_pubkey);
         AuCPaceServerExpMutAuth::new(self.ssid, sk1)
     }

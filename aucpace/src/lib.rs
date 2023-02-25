@@ -25,7 +25,7 @@
 //! refer to AuCPace literature[1]. All arithmetic is done on the (hyper-) elliptic curve `C`
 //! in group `J`, with co-factor `c_J` and Diffie-Hellman base point `B` in `J`.
 //! It's STRONGLY recommended to use AuCPace parameters provided by this crate
-//! in the TODO: insert default instantiation here
+//! in the [`Client`](Client) and [`Server`](Server) default instantiations.
 //!
 //! |       Server                    |   Data transfer   |      Client                     |
 //! |---------------------------------|-------------------|---------------------------------|
@@ -79,8 +79,6 @@
 //! - `K` — shared secret point from diffie hellman protocol
 //! - `sk1` — first session key derived from K
 //! - `sk` — the final session key refreshed from sk1
-//!
-//! TODO: make a ladder diagram for the various structs and messages that are exchanged in the actual code
 //!
 //! [1]: https://eprint.iacr.org/2018/286.pdf
 
