@@ -7,7 +7,7 @@ pub trait Database {
     /// The type of password verifier stored in the database
     type PasswordVerifier;
 
-    /// perform LookupW, returning the password verifier W if it exists
+    /// perform `LookupW`, returning the password verifier `W`, if it exists.
     ///
     /// # Arguments:
     /// `username`: the user the lookup the verifier for
@@ -22,10 +22,10 @@ pub trait Database {
         username: &[u8],
     ) -> Option<(Self::PasswordVerifier, SaltString, ParamsString)>;
 
-    /// store a username, salt, verifier and hash parameters to the database
-    /// Verification is performed by the server and credentials will only be stored once verified.
+    /// store a username, salt, verifier and hash parameters to the database.
     /// This function should allow for overwriting users credentials if they exist.
-    /// This is required for password changes and will only be performed when appropriate by the
+    /// This is required for password changes and should only be performed once the user has
+    /// negotiated a full session key.
     ///
     /// # Arguments:
     /// - `username`: The name of the user who is storing a verifier
@@ -117,10 +117,10 @@ pub trait StrongDatabase {
         username: &[u8],
     ) -> Option<(Self::PasswordVerifier, Self::Exponent, ParamsString)>;
 
-    /// store a username, secret exponent, verifier and hash parameters to the database
-    /// Verification is performed by the server and credentials will only be stored once verified.
+    /// store a username, secret exponent, verifier and hash parameters to the database.
     /// This function should allow for overwriting users credentials if they exist.
-    /// This is required for password changes and will only be performed when appropriate by the
+    /// This is required for password changes and should only be done once the user has negotiated
+    /// a full session key.
     ///
     /// # Arguments:
     /// - `username`: The name of the user who is storing a verifier
