@@ -25,6 +25,9 @@ use crate::database::StrongDatabase;
 #[cfg(feature = "serde")]
 use crate::utils::{serde_paramsstring, serde_saltstring};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// A non-copy wrapper around u64
 #[derive(Clone)]
 struct ServerSecret(u64);
@@ -343,7 +346,8 @@ where
     )
     where
         U: AsRef<[u8]>,
-        DB: StrongDatabase<PasswordVerifier = RistrettoPoint, Exponent = RistrettoPoint>,
+        DB: StrongDatabase<PasswordVerifier = RistrettoPoint, Exponent = Scalar>
+            + PartialAugDatabase<PrivateKey = Scalar, PublicKey = RistrettoPoint>,
         CSPRNG: RngCore + CryptoRng,
     {
         let user = username.as_ref();
@@ -354,7 +358,7 @@ where
             // if the user does not have a keypair stored then we generate a random point on the
             // curve to be the public key, and handle the failed lookup as normal
             let x_pub = RistrettoPoint::random(&mut rng);
-            self.lookup_failed_strong(user, x_pub, &mut rng)
+            self.lookup_failed_strong(user, blinded, x_pub, &mut rng)
         };
         let next_step = AuCPaceServerCPaceSubstep::new(self.ssid, prs, rng);
 
@@ -375,7 +379,7 @@ where
         CSPRNG: RngCore + CryptoRng,
     {
         if let Some((w, salt, sigma)) = database.lookup_verifier(username.as_ref()) {
-            let cofactor = Scalar::one();
+            let cofactor = Scalar::ONE;
             let prs = (w * x * cofactor).compress().to_bytes();
             let message = ServerMessage::AugmentationInfo {
                 // this will have to be provided by the trait in future
@@ -408,7 +412,7 @@ where
         CSPRNG: RngCore + CryptoRng,
     {
         if let Some((w, q, sigma)) = database.lookup_verifier_strong(username.as_ref()) {
-            let cofactor = Scalar::one();
+            let cofactor = Scalar::ONE;
             let prs = (w * (x * cofactor)).compress().to_bytes();
             let uq = blinded * (q * cofactor);
             let message = ServerMessage::StrongAugmentationInfo {
@@ -486,7 +490,7 @@ where
         let mut hasher: D = Default::default();
         hasher.update(self.secret.0.to_le_bytes());
         hasher.update(username);
-        let cofactor = Scalar::one();
+        let cofactor = Scalar::ONE;
         let q = Scalar::from_hash(hasher);
         let fake_blinded_salt = blinded * (q * cofactor);
 
@@ -657,12 +661,8 @@ where
 }
 
 /// An enum representing the different messages the server can send to the client
-#[cfg_attr(
-    feature = "serde",
-    derive(our_serde::Serialize, our_serde::Deserialize)
-)]
-#[cfg_attr(feature = "serde", serde(crate = "our_serde"))]
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ServerMessage<'a, const K1: usize> {
     /// SSID establishment message - the server's nonce: `s`
     Nonce(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; K1]),

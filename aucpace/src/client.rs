@@ -19,14 +19,17 @@ use password_hash::{ParamsString, PasswordHash, PasswordHasher, Salt, SaltString
 use rand_core::{CryptoRng, RngCore};
 use subtle::ConstantTimeEq;
 
-#[cfg(feature = "serde")]
-use crate::utils::{serde_paramsstring, serde_saltstring};
-
 #[cfg(feature = "strong_aucpace")]
 use crate::utils::H1;
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
+
+#[cfg(feature = "serde")]
+use crate::utils::{serde_paramsstring, serde_saltstring};
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// Implementation of the client side of the AuCPace protocol
 pub struct AuCPaceClient<D, H, CSPRNG, const K1: usize>
@@ -123,10 +126,7 @@ where
     where
         P: AsRef<[u8]>,
     {
-        // adapted from SaltString::generate, which we cannot use due to curve25519 versions of rand_core
-        let mut salt = [0u8; Salt::RECOMMENDED_LENGTH];
-        self.rng.fill_bytes(&mut salt);
-        let salt_string = SaltString::b64_encode(&salt).expect("Salt length invariant broken.");
+        let salt_string = SaltString::generate(&mut self.rng);
 
         // compute the verifier W
         let pw_hash = hash_password::<&[u8], P, &SaltString, H, BUFSIZ>(
@@ -137,7 +137,7 @@ where
             hasher,
         )?;
 
-        let cofactor = Scalar::one();
+        let cofactor = Scalar::ONE;
         let w = scalar_from_hash(pw_hash)?;
         let verifier = RISTRETTO_BASEPOINT_POINT * (w * cofactor);
 
@@ -193,7 +193,7 @@ where
             params.clone(),
             hasher,
         )?;
-        let cofactor = Scalar::one();
+        let cofactor = Scalar::ONE;
         let w = scalar_from_hash(pw_hash)?;
         let verifier = RISTRETTO_BASEPOINT_POINT * (w * cofactor);
 
@@ -235,14 +235,12 @@ where
         P: AsRef<[u8]>,
     {
         // adapted from SaltString::generate, which we cannot use due to curve25519 versions of rand_core
-        let mut salt = [0u8; Salt::RECOMMENDED_LENGTH];
-        self.rng.fill_bytes(&mut salt);
-        let salt_string = SaltString::b64_encode(&salt).expect("Salt length invariant broken.");
+        let salt_string = SaltString::generate(&mut self.rng);
 
         // compute the verifier W
         let pw_hash =
             hash_password_alloc(username, password, &salt_string, params.clone(), hasher)?;
-        let cofactor = Scalar::one();
+        let cofactor = Scalar::ONE;
         let w = scalar_from_hash(pw_hash)?;
         let verifier = RISTRETTO_BASEPOINT_POINT * (w * cofactor);
 
@@ -300,7 +298,7 @@ where
             params.clone(),
             hasher,
         )?;
-        let cofactor = Scalar::one();
+        let cofactor = Scalar::ONE;
         let w = scalar_from_hash(pw_hash)?;
         let verifier = RISTRETTO_BASEPOINT_POINT * (w * cofactor);
 
@@ -332,7 +330,7 @@ where
         let z = RistrettoPoint::from_hash(hasher);
 
         // compute the salt value
-        let cofactor = Scalar::one();
+        let cofactor = Scalar::ONE;
         let salt_point = z * (q * cofactor);
         let salt = salt_point.compress().to_bytes();
         let salt_string = SaltString::b64_encode(&salt).map_err(Error::PasswordHashing)?;
@@ -453,7 +451,7 @@ where
         // ensuring that it is non-zero as required by `invert`
         let blinding_value = loop {
             let val = Scalar::random(rng);
-            if val != Scalar::zero() {
+            if val != Scalar::ZERO {
                 break val;
             }
         };
@@ -461,7 +459,7 @@ where
         hasher.update(username);
         hasher.update(password);
         let z = RistrettoPoint::from_hash(hasher);
-        let cofactor = Scalar::one();
+        let cofactor = Scalar::ONE;
         let blinded = z * (blinding_value * cofactor);
 
         let next_step =
@@ -530,7 +528,7 @@ where
     where
         S: Into<Salt<'a>>,
     {
-        let cofactor = Scalar::one();
+        let cofactor = Scalar::ONE;
         let pw_hash = hash_password::<&[u8], &[u8], S, H, BUFSIZ>(
             self.username,
             self.password,
@@ -573,7 +571,7 @@ where
     where
         S: Into<Salt<'a>>,
     {
-        let cofactor = Scalar::one();
+        let cofactor = Scalar::ONE;
         let pw_hash = hash_password_alloc(self.username, self.password, salt, params, hasher)?;
         let w = scalar_from_hash(pw_hash)?;
 
@@ -648,7 +646,7 @@ where
         hasher: H,
     ) -> Result<AuCPaceClientCPaceSubstep<D, K1>> {
         // first recover the salt
-        let cofactor = Scalar::one();
+        let cofactor = Scalar::ONE;
 
         // this is a tad funky, in the paper they write (1/(r * cj^2))*cj
         // I have interpreted this as the multiplicative inverse of (r * cj^2)
@@ -698,7 +696,7 @@ where
         hasher: H,
     ) -> Result<AuCPaceClientCPaceSubstep<D, K1>> {
         // first recover the salt
-        let cofactor = Scalar::one();
+        let cofactor = Scalar::ONE;
 
         // this is a tad funky, in the paper they write (1/(r * cj^2))*cj
         // I have interpreted this as the multiplicative inverse of (r * cj^2)
@@ -946,12 +944,8 @@ where
 }
 
 /// An enum representing the different messages the client can send to the server
-#[cfg_attr(
-    feature = "serde",
-    derive(our_serde::Serialize, our_serde::Deserialize)
-)]
-#[cfg_attr(feature = "serde", serde(crate = "our_serde"))]
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ClientMessage<'a, const K1: usize> {
     /// SSID establishment message - the client's nonce: `t`
     Nonce(#[cfg_attr(feature = "serde", serde(with = "serde_arrays"))] [u8; K1]),

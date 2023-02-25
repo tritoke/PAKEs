@@ -77,7 +77,7 @@ where
 
     let generator = RistrettoPoint::from_hash(hasher);
     let priv_key = Scalar::random(rng);
-    let cofactor = Scalar::one();
+    let cofactor = Scalar::ONE;
     let pub_key = generator * (priv_key * cofactor);
 
     (priv_key, pub_key)
@@ -166,7 +166,7 @@ where
 {
     // for ristretto255 the cofactor is 1, for normal curve25519 it is 8
     // this will need to be provided by a group trait in the future
-    let cofactor = Scalar::one();
+    let cofactor = Scalar::ONE;
     let private = Scalar::random(rng);
     let public = RISTRETTO_BASEPOINT_POINT * (private * cofactor);
 
@@ -177,8 +177,8 @@ where
 #[cfg(feature = "serde")]
 pub(crate) mod serde_saltstring {
     use core::fmt;
-    use our_serde::de::{Error, Visitor};
-    use our_serde::{Deserializer, Serializer};
+    use serde::de::{Error, Visitor};
+    use serde::{Deserializer, Serializer};
     use password_hash::SaltString;
 
     pub fn serialize<S>(data: &SaltString, serializer: S) -> Result<S::Ok, S::Error>
@@ -216,8 +216,8 @@ pub(crate) mod serde_saltstring {
 #[cfg(any(feature = "serde"))]
 pub(crate) mod serde_paramsstring {
     use core::fmt;
-    use our_serde::de::{Error, Visitor};
-    use our_serde::{Deserializer, Serializer};
+    use serde::de::{Error, Visitor};
+    use serde::{Deserializer, Serializer};
     use password_hash::ParamsString;
 
     pub fn serialize<S>(data: &ParamsString, serializer: S) -> Result<S::Ok, S::Error>
