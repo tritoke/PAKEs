@@ -102,7 +102,7 @@ fn main() -> Result<()> {
 
     // ===== Augmentation Layer =====
     // client begins the augmentation layer by sending the username to the server
-    let (client, message) = client.start_augmentation(USERNAME);
+    let (client, message) = client.start_augmentation(USERNAME, PASSWORD);
     let bytes_sent = send!(client_buf, message);
     client_bytes_sent += bytes_sent;
     println!(
@@ -141,7 +141,7 @@ fn main() -> Result<()> {
 
             Params::new(log_n, r, p).unwrap()
         };
-        client.generate_cpace::<&[u8], &SaltString, 100>(x_pub, PASSWORD, &salt, params, Scrypt)?
+        client.generate_cpace::<&SaltString, 100>(x_pub, &salt, params, Scrypt)?
     } else {
         panic!("Received invalid server message {:?}", server_message);
     };

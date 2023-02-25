@@ -44,4 +44,16 @@ postcard = "1"
 
 [[example]]
 name = "key_agreement"
+required-features = ["default", "alloc", "serde"]
+
+[[example]]
+name = "key_agreement_no_std"
 required-features = ["default", "serde"]
+
+[[example]]
+name = "key_agreement_partial_aug"
+required-features = ["default", "serde", "partial_augmentation"]
+
+[[example]]
+name = "key_agreement_strong"
+required-features = ["default", "serde", "strong_aucpace"]

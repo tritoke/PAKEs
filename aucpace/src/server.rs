@@ -298,7 +298,7 @@ where
     )
     where
         U: AsRef<[u8]>,
-        DB: StrongDatabase<PasswordVerifier = RistrettoPoint, Exponent = RistrettoPoint>,
+        DB: StrongDatabase<PasswordVerifier = RistrettoPoint, Exponent = Scalar>,
         CSPRNG: RngCore + CryptoRng,
     {
         let (x, x_pub) = generate_server_keypair(&mut rng);
@@ -354,7 +354,7 @@ where
             // if the user does not have a keypair stored then we generate a random point on the
             // curve to be the public key, and handle the failed lookup as normal
             let x_pub = RistrettoPoint::random(&mut rng);
-            self.lookup_failed(user, x_pub, &mut rng)
+            self.lookup_failed_strong(user, x_pub, &mut rng)
         };
         let next_step = AuCPaceServerCPaceSubstep::new(self.ssid, prs, rng);
 
@@ -421,7 +421,7 @@ where
             (prs, message)
         } else {
             // handle the failure case
-            self.lookup_failed(username, x_pub, rng)
+            self.lookup_failed_strong(username, blinded, x_pub, rng)
         }
     }
 
@@ -458,6 +458,42 @@ where
             group: "ristretto255",
             x_pub,
             salt,
+            pbkdf_params: Default::default(),
+        };
+
+        (prs, message)
+    }
+
+    /// Generate the message for if the lookup failed
+    #[cfg(feature = "strong_aucpace")]
+    fn lookup_failed_strong<CSPRNG>(
+        &self,
+        username: &[u8],
+        blinded: RistrettoPoint,
+        x_pub: RistrettoPoint,
+        rng: &mut CSPRNG,
+    ) -> ([u8; 32], ServerMessage<'static, K1>)
+    where
+        CSPRNG: RngCore + CryptoRng,
+    {
+        let prs = {
+            let mut tmp = [0u8; 32];
+            rng.fill_bytes(&mut tmp);
+            tmp
+        };
+
+        // generate q from the hash of the username and the server secret
+        let mut hasher: D = Default::default();
+        hasher.update(self.secret.0.to_le_bytes());
+        hasher.update(username);
+        let cofactor = Scalar::one();
+        let q = Scalar::from_hash(hasher);
+        let fake_blinded_salt = blinded * (q * cofactor);
+
+        let message = ServerMessage::StrongAugmentationInfo {
+            group: "ristretto255",
+            x_pub,
+            blinded_salt: fake_blinded_salt,
             pbkdf_params: Default::default(),
         };
 

@@ -157,7 +157,7 @@ fn main() -> Result<()> {
         };
 
         // ===== Augmentation Layer =====
-        let (client, message) = client.start_augmentation(USERNAME);
+        let (client, message) = client.start_augmentation(USERNAME, PASSWORD);
         let bytes_sent = send!(stream, message);
         CLIENT_BYTES_SENT.fetch_add(bytes_sent, Ordering::SeqCst);
         println!(
@@ -181,7 +181,7 @@ fn main() -> Result<()> {
 
                 Params::new(log_n, r, p).unwrap()
             };
-            client.generate_cpace_alloc(x_pub, PASSWORD, &salt, params, Scrypt)?
+            client.generate_cpace_alloc(x_pub, &salt, params, Scrypt)?
         } else {
             panic!("Received invalid server message {:?}", server_message);
         };

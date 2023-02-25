@@ -1,14 +1,10 @@
-use crate::utils::{
-    compute_authenticator_messages, compute_first_session_key, compute_session_key, generate_nonce,
-    scalar_from_hash, H0, H1,
-};
 use crate::{
     errors::{Error, Result},
-    utils::{compute_ssid, generate_keypair},
+    utils::{
+        compute_authenticator_messages, compute_first_session_key, compute_session_key,
+        compute_ssid, generate_keypair, generate_nonce, scalar_from_hash, H0,
+    },
 };
-
-#[cfg(feature = "serde")]
-use crate::utils::{serde_paramsstring, serde_saltstring};
 
 use crate::constants::MIN_SSID_LEN;
 use core::marker::PhantomData;
@@ -22,6 +18,12 @@ use curve25519_dalek::{
 use password_hash::{ParamsString, PasswordHash, PasswordHasher, Salt, SaltString};
 use rand_core::{CryptoRng, RngCore};
 use subtle::ConstantTimeEq;
+
+#[cfg(feature = "serde")]
+use crate::utils::{serde_paramsstring, serde_saltstring};
+
+#[cfg(feature = "strong_aucpace")]
+use crate::utils::H1;
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -168,6 +170,7 @@ where
     /// - Err([`Error::PasswordHashing`](Error::PasswordHashing) | [`Error::HashEmpty`](Error::HashEmpty) | [`Error::HashSizeInvalid`](Error::HashSizeInvalid)):
     ///   one of the three error variants that can result from the password hashing process
     ///
+    #[cfg(feature = "strong_aucpace")]
     pub fn register_strong<'a, P, const BUFSIZ: usize>(
         &mut self,
         username: &'a [u8],
@@ -178,20 +181,9 @@ where
     where
         P: AsRef<[u8]>,
     {
-        // choose a random q
-        let q = Scalar::random(&mut self.rng);
-
-        // compute z
-        let mut hasher1: D = H1();
-        hasher1.update(username);
-        hasher1.update(password.as_ref());
-        let z = RistrettoPoint::from_hash(hasher1);
-
-        // compute the salt value
-        let cofactor = Scalar::one();
-        let salt_point = z * (q * cofactor);
-        let salt = salt_point.compress().to_bytes();
-        let salt_string = SaltString::b64_encode(&salt).map_err(Error::PasswordHashing)?;
+        // generate a secret exponent and salt
+        let (q, salt_string) =
+            Self::generate_salt_strong(username, password.as_ref(), &mut self.rng)?;
 
         // compute the verifier W
         let pw_hash = hash_password::<&[u8], P, &SaltString, H, BUFSIZ>(
@@ -201,6 +193,7 @@ where
             params.clone(),
             hasher,
         )?;
+        let cofactor = Scalar::one();
         let w = scalar_from_hash(pw_hash)?;
         let verifier = RISTRETTO_BASEPOINT_POINT * (w * cofactor);
 
@@ -262,6 +255,89 @@ where
             params: params_string,
             verifier,
         })
+    }
+
+    /// Register a username/password in the strong variant of the protocol
+    ///
+    /// Allocates space for user:pass string on the heap, instead of a constant size buffer.
+    ///
+    /// # Arguments:
+    /// - `username` - the username to register with
+    /// - `password` - the password for the user
+    /// - `params` - the parameters of the PBKDF used
+    /// - `hasher` - the hasher to use for hashing the username and password.
+    ///
+    /// # Const Parameters
+    /// - `BUFSIZ` - the size of the buffer to use while hashing
+    ///   it should be enough to store the maximum length of a username + password + 1 for your use case
+    ///   e.g. if you have a username limit of 20 and password limit of 60, 81 would be the right value.
+    ///
+    /// # Return:
+    /// - Ok([`messsage`](ClientMessage::Registration)): the message to send to the server
+    /// - Err([`Error::PasswordHashing`](Error::PasswordHashing) | [`Error::HashEmpty`](Error::HashEmpty) | [`Error::HashSizeInvalid`](Error::HashSizeInvalid)):
+    ///   one of the three error variants that can result from the password hashing process
+    ///
+    #[cfg(all(feature = "strong_aucpace", feature = "alloc"))]
+    pub fn register_alloc_strong<'a, P>(
+        &mut self,
+        username: &'a [u8],
+        password: P,
+        params: H::Params,
+        hasher: H,
+    ) -> Result<ClientMessage<'a, K1>>
+    where
+        P: AsRef<[u8]>,
+    {
+        // generate a secret exponent and salt
+        let (q, salt_string) =
+            Self::generate_salt_strong(username, password.as_ref(), &mut self.rng)?;
+
+        // compute the verifier W
+        let pw_hash = hash_password_alloc(
+            username,
+            password,
+            salt_string.as_salt(),
+            params.clone(),
+            hasher,
+        )?;
+        let cofactor = Scalar::one();
+        let w = scalar_from_hash(pw_hash)?;
+        let verifier = RISTRETTO_BASEPOINT_POINT * (w * cofactor);
+
+        // attempt to convert the parameters to a ParamsString
+        let params_string = params.try_into().map_err(Error::PasswordHashing)?;
+
+        Ok(ClientMessage::StrongRegistration {
+            username,
+            secret_exponent: q,
+            params: params_string,
+            verifier,
+        })
+    }
+
+    /// generate a secret exponent and a salt value for the strong variant of the protocol
+    #[cfg(feature = "strong_aucpace")]
+    fn generate_salt_strong(
+        user: &[u8],
+        pass: &[u8],
+        rng: &mut CSPRNG,
+    ) -> Result<(Scalar, SaltString)> {
+        // choose a random q
+        let q = Scalar::random(rng);
+
+        // compute z
+        let mut hasher: D = H1();
+        hasher.update(user);
+        hasher.update(pass);
+        let z = RistrettoPoint::from_hash(hasher);
+
+        // compute the salt value
+        let cofactor = Scalar::one();
+        let salt_point = z * (q * cofactor);
+        let salt = salt_point.compress().to_bytes();
+        let salt_string = SaltString::b64_encode(&salt).map_err(Error::PasswordHashing)?;
+
+        Ok((q, salt_string))
     }
 }
 
@@ -338,12 +414,53 @@ where
     /// - [`next_step`](AuCPaceClientAugLayer): the client in the augmentation layer
     /// - [`message`](ClientMessage::Username): the message to send to the server
     ///
-    pub fn start_augmentation(
+    pub fn start_augmentation<'a>(
         self,
-        username: &[u8],
-    ) -> (AuCPaceClientAugLayer<'_, D, H, K1>, ClientMessage<'_, K1>) {
-        let next_step = AuCPaceClientAugLayer::new(self.ssid, username);
+        username: &'a [u8],
+        password: &'a [u8],
+    ) -> (AuCPaceClientAugLayer<'a, D, H, K1>, ClientMessage<'a, K1>) {
+        let next_step = AuCPaceClientAugLayer::new(self.ssid, username, password);
         let message = ClientMessage::Username(username);
+
+        (next_step, message)
+    }
+
+    /// Consume the client's username and begin the augmentation layer.
+    /// This variant performs the strong version of the protocol.
+    ///
+    /// # Arguments:
+    /// - `username` - a reference to the client's username
+    ///
+    /// # Return:
+    /// ([`next_step`](StrongAuCPaceClientAugLayer), [`message`](ClientMessage::Username))
+    /// - [`next_step`](StrongAuCPaceClientAugLayer): the client in the augmentation layer
+    /// - [`message`](ClientMessage::Username): the message to send to the server
+    ///
+    #[cfg(feature = "strong_aucpace")]
+    pub fn start_augmentation_strong<'a, CSPRNG>(
+        self,
+        username: &'a [u8],
+        password: &'a [u8],
+        rng: &mut CSPRNG,
+    ) -> (
+        StrongAuCPaceClientAugLayer<'a, D, H, K1>,
+        ClientMessage<'a, K1>,
+    )
+    where
+        CSPRNG: RngCore + CryptoRng,
+    {
+        // compute the blinding value and blind the hash of the username and password
+        let blinding_value = Scalar::random(rng);
+        let mut hasher: D = H1();
+        hasher.update(username);
+        hasher.update(password);
+        let z = RistrettoPoint::from_hash(hasher);
+        let cofactor = Scalar::one();
+        let blinded = z * (blinding_value * cofactor);
+
+        let next_step =
+            StrongAuCPaceClientAugLayer::new(self.ssid, username, password, blinding_value);
+        let message = ClientMessage::StrongUsername { username, blinded };
 
         (next_step, message)
     }
@@ -357,6 +474,7 @@ where
 {
     ssid: Output<D>,
     username: &'a [u8],
+    password: &'a [u8],
     h: PhantomData<H>,
 }
 
@@ -365,10 +483,11 @@ where
     D: Digest<OutputSize = U64> + Default,
     H: PasswordHasher,
 {
-    fn new(ssid: Output<D>, username: &'a [u8]) -> Self {
+    fn new(ssid: Output<D>, username: &'a [u8], password: &'a [u8]) -> Self {
         Self {
             ssid,
             username,
+            password,
             h: Default::default(),
         }
     }
@@ -378,7 +497,6 @@ where
     ///
     /// # Arguments:
     /// - `x_pub` - `x` from the protocol definition, used in generating the password related string (prs)
-    /// - `password` - the user's password
     /// - `salt` - the salt value sent by the server
     /// - `params` - the parameters used by the hasher
     /// - `hasher` - the hasher to use when computing `w`
@@ -396,21 +514,24 @@ where
     /// - Err([`Error::PasswordHashing`](Error::PasswordHashing) | [`Error::HashEmpty`](Error::HashEmpty) | [`Error::HashSizeInvalid`](Error::HashSizeInvalid)):
     ///   one of the three error variants that can result from the password hashing process
     ///
-    pub fn generate_cpace<'salt, P, S, const BUFSIZ: usize>(
+    pub fn generate_cpace<'salt, S, const BUFSIZ: usize>(
         self,
         x_pub: RistrettoPoint,
-        password: P,
         salt: S,
         params: H::Params,
         hasher: H,
     ) -> Result<AuCPaceClientCPaceSubstep<D, K1>>
     where
-        P: AsRef<[u8]>,
         S: Into<Salt<'a>>,
     {
         let cofactor = Scalar::one();
-        let pw_hash =
-            hash_password::<&[u8], P, S, H, BUFSIZ>(self.username, password, salt, params, hasher)?;
+        let pw_hash = hash_password::<&[u8], &[u8], S, H, BUFSIZ>(
+            self.username,
+            self.password,
+            salt,
+            params,
+            hasher,
+        )?;
         let w = scalar_from_hash(pw_hash)?;
 
         let prs = (x_pub * (w * cofactor)).compress().to_bytes();
@@ -420,6 +541,132 @@ where
 
     /// Process the augmentation layer information from the server, hashes the user's password
     /// together with their username, then computes `w` and `PRS`.
+    ///
+    /// This version requires the alloc feature and allocates space for
+    /// the username:password string on the heap.
+    ///
+    /// # Arguments:
+    /// - `x_pub` - `x` from the protocol definition, used in generating the password related string (prs)
+    /// - `salt` - the salt value sent by the server
+    /// - `params` - the parameters used by the hasher
+    /// - `hasher` - the hasher to use when computing `w`
+    ///
+    /// # Return:
+    /// - Ok([`next_step`](AuCPaceClientCPaceSubstep)): the client in the cpace substep
+    /// - Err([`Error::PasswordHashing`](Error::PasswordHashing) | [`Error::HashEmpty`](Error::HashEmpty) | [`Error::HashSizeInvalid`](Error::HashSizeInvalid)):
+    ///   one of the three error variants that can result from the password hashing process
+    ///
+    #[cfg(feature = "alloc")]
+    pub fn generate_cpace_alloc<'salt, S>(
+        self,
+        x_pub: RistrettoPoint,
+        salt: S,
+        params: H::Params,
+        hasher: H,
+    ) -> Result<AuCPaceClientCPaceSubstep<D, K1>>
+    where
+        S: Into<Salt<'a>>,
+    {
+        let cofactor = Scalar::one();
+        let pw_hash = hash_password_alloc(self.username, self.password, salt, params, hasher)?;
+        let w = scalar_from_hash(pw_hash)?;
+
+        let prs = (x_pub * (w * cofactor)).compress().to_bytes();
+
+        Ok(AuCPaceClientCPaceSubstep::new(self.ssid, prs))
+    }
+}
+
+/// Client in the augmentation layer - strong version
+#[cfg(feature = "strong_aucpace")]
+pub struct StrongAuCPaceClientAugLayer<'a, D, H, const K1: usize>
+where
+    D: Digest<OutputSize = U64> + Default,
+    H: PasswordHasher,
+{
+    ssid: Output<D>,
+    username: &'a [u8],
+    password: &'a [u8],
+    blinding_value: Scalar,
+    h: PhantomData<H>,
+}
+
+#[cfg(feature = "strong_aucpace")]
+impl<'a, D, H, const K1: usize> StrongAuCPaceClientAugLayer<'a, D, H, K1>
+where
+    D: Digest<OutputSize = U64> + Default,
+    H: PasswordHasher,
+{
+    fn new(
+        ssid: Output<D>,
+        username: &'a [u8],
+        password: &'a [u8],
+        blinding_value: Scalar,
+    ) -> Self {
+        Self {
+            ssid,
+            username,
+            password,
+            blinding_value,
+            h: Default::default(),
+        }
+    }
+
+    /// Process the strong augmentation layer information from the server, unblinds the salt value,
+    /// hashes the user's password together with their username, then computes `w` and `PRS`.
+    ///
+    /// # Arguments:
+    /// - `x_pub` - `x` from the protocol definition, used in generating the password related string (prs)
+    /// - `salt_point` - our blinded point `U`, multiplied by the server's secret exponent `q`
+    /// - `params` - the parameters used by the hasher
+    /// - `hasher` - the hasher to use when computing `w`
+    ///
+    /// # Const Parameters
+    /// - `BUFSIZ` - the size of the buffer to use while hashing
+    ///   it should be enough to store the maximum length of a username + password + 1 for your use case
+    ///   e.g. if you have a username limit of 20 and password limit of 60, 81 would be the right value.
+    ///
+    /// This version requires the alloc feature and allocates space for
+    /// the username and password on the heap using Vec.
+    ///
+    /// # Return:
+    /// - Ok([`next_step`](AuCPaceClientCPaceSubstep)): the client in the cpace substep
+    /// - Err([`Error::PasswordHashing`](Error::PasswordHashing) | [`Error::HashEmpty`](Error::HashEmpty) | [`Error::HashSizeInvalid`](Error::HashSizeInvalid)):
+    ///   one of the three error variants that can result from the password hashing process
+    ///
+    pub fn generate_cpace<const BUFSIZ: usize>(
+        self,
+        x_pub: RistrettoPoint,
+        blinded_salt: RistrettoPoint,
+        params: H::Params,
+        hasher: H,
+    ) -> Result<AuCPaceClientCPaceSubstep<D, K1>> {
+        // first recover the salt
+        let cofactor = Scalar::one();
+
+        // this is a tad funky, in the paper they write (1/(r * cj^2))*cj
+        // I have interpreted this as the multiplicative inverse of (r * cj^2)
+        // then multiplied by cj again.
+        let exponent = (self.blinding_value * cofactor * cofactor).invert() * cofactor;
+        let salt = (blinded_salt * exponent).compress().to_bytes();
+        let salt_string = SaltString::b64_encode(&salt).map_err(Error::PasswordHashing)?;
+
+        // compute the PRS
+        let pw_hash = hash_password::<&[u8], &[u8], &SaltString, H, BUFSIZ>(
+            self.username,
+            self.password,
+            &salt_string,
+            params,
+            hasher,
+        )?;
+        let w = scalar_from_hash(pw_hash)?;
+        let prs = (x_pub * (w * cofactor)).compress().to_bytes();
+
+        Ok(AuCPaceClientCPaceSubstep::new(self.ssid, prs))
+    }
+
+    /// Process the strong augmentation layer information from the server, unblinds the salt value,
+    /// hashes the user's password together with their username, then computes `w` and `PRS`.
     ///
     /// This version requires the alloc feature and allocates space for
     /// the username:password string on the heap.
@@ -437,22 +684,32 @@ where
     ///   one of the three error variants that can result from the password hashing process
     ///
     #[cfg(feature = "alloc")]
-    pub fn generate_cpace_alloc<'salt, P, S>(
+    pub fn generate_cpace_alloc(
         self,
         x_pub: RistrettoPoint,
-        password: P,
-        salt: S,
+        blinded_salt: RistrettoPoint,
         params: H::Params,
         hasher: H,
-    ) -> Result<AuCPaceClientCPaceSubstep<D, K1>>
-    where
-        P: AsRef<[u8]>,
-        S: Into<Salt<'a>>,
-    {
+    ) -> Result<AuCPaceClientCPaceSubstep<D, K1>> {
+        // first recover the salt
         let cofactor = Scalar::one();
-        let pw_hash = hash_password_alloc(self.username, password, salt, params, hasher)?;
-        let w = scalar_from_hash(pw_hash)?;
 
+        // this is a tad funky, in the paper they write (1/(r * cj^2))*cj
+        // I have interpreted this as the multiplicative inverse of (r * cj^2)
+        // then multiplied by cj again.
+        let exponent = (self.blinding_value * cofactor * cofactor).invert() * cofactor;
+        let salt = (blinded_salt * exponent).compress().to_bytes();
+        let salt_string = SaltString::b64_encode(&salt).map_err(Error::PasswordHashing)?;
+
+        // compute the PRS
+        let pw_hash = hash_password_alloc(
+            self.username,
+            self.password,
+            salt_string.as_salt(),
+            params,
+            hasher,
+        )?;
+        let w = scalar_from_hash(pw_hash)?;
         let prs = (x_pub * (w * cofactor)).compress().to_bytes();
 
         Ok(AuCPaceClientCPaceSubstep::new(self.ssid, prs))
@@ -697,6 +954,16 @@ pub enum ClientMessage<'a, const K1: usize> {
     /// Username - the client's username
     Username(&'a [u8]),
 
+    /// StrongUsername - the strong AuCPace username message
+    /// also contains the blinded point `U`
+    #[cfg(feature = "strong_aucpace")]
+    StrongUsername {
+        /// The client's username
+        username: &'a [u8],
+        /// The blinded point `U`
+        blinded: RistrettoPoint,
+    },
+
     /// PublicKey - the client's public key: `Ya`
     PublicKey(RistrettoPoint),
 
@@ -723,6 +990,7 @@ pub enum ClientMessage<'a, const K1: usize> {
 
     /// Registration Strong version - the username, verifier, secret exponent and parameters needed for registering a user
     /// NOTE: if the UAD field is desired this should be handled separately and sent at the same time
+    #[cfg(feature = "strong_aucpace")]
     StrongRegistration {
         /// The username of whoever is registering
         username: &'a [u8],

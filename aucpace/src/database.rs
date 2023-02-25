@@ -46,7 +46,7 @@ pub trait Database {
     );
 }
 
-/// trait for AuCPace to use to abstract over the storage and retrieval of verifiers
+/// trait for AuCPace to use to abstract over the storage and retrieval of long-term keypairs
 #[cfg(feature = "partial_augmentation")]
 pub trait PartialAugDatabase {
     /// The private key type
@@ -93,7 +93,7 @@ pub trait PartialAugDatabase {
     ) -> Result<()>;
 }
 
-/// trait for AuCPace to use to abstract over the storage and retrieval of verifiers
+/// trait for AuCPace to use to abstract over the storage and retrieval of verifiers and secret exponents
 #[cfg(feature = "strong_aucpace")]
 pub trait StrongDatabase {
     /// The type of password verifier stored in the database
@@ -102,16 +102,16 @@ pub trait StrongDatabase {
     /// The type of the secret exponent `q` stored in the database
     type Exponent;
 
-    /// perform LookupW, returning the password verifier W, and secret exponent q if it exists
+    /// perform `LookupW`, returning the password verifier `W`, and secret exponent `q` if they exist
     ///
     /// # Arguments:
-    /// `username`: the user the lookup the verifier for
+    /// `username`: the user to lookup the verifier for
     ///
     /// # Return:
-    /// `(password verifier, secret exponent, salt, sigma)`:
-    /// - `password verifier`: is the verifier stored for the given user
+    /// `(password verifier, secret exponent, params)`:
+    /// - `password verifier`: the verifier stored for the given user
     /// - `secret exponent`: the value of `q` stored for the given user
-    /// - `params`: is the parameters used by the the PBKDF when hashing the user's password
+    /// - `params`: the parameters used by the the PBKDF when hashing the user's password
     fn lookup_verifier_strong(
         &self,
         username: &[u8],
@@ -130,7 +130,7 @@ pub trait StrongDatabase {
     /// - `verifier`: The password verifier for the given user
     /// - `secret exponent`: the value of `q` stored for the given user
     /// - `params`: The parameters used when hashing the password into the verifier -
-    ///             It is called sigma in the protocol defionition
+    ///             It is called sigma in the protocol definition
     fn store_verifier_strong(
         &mut self,
         username: &[u8],
