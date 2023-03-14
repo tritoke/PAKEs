@@ -1011,6 +1011,8 @@ mod tests {
     use super::*;
     use crate::Client;
     use rand_core::OsRng;
+
+    #[cfg(all(feature = "alloc", feature = "getrandom", feature = "scrypt"))]
     use scrypt::{Params, Scrypt};
 
     #[test]
