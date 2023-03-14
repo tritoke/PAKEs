@@ -1010,14 +1010,14 @@ pub enum ClientMessage<'a, const K1: usize> {
 mod tests {
     use super::*;
     use crate::Client;
-    use rand_core::{OsRng, RngCore};
-
-    #[cfg(all(feature = "alloc", feature = "getrandom", feature = "scrypt"))]
-    use scrypt::{Params, Scrypt};
+    use rand_core::OsRng;
 
     #[test]
     #[cfg(all(feature = "alloc", feature = "getrandom", feature = "scrypt"))]
     fn test_hash_password_no_std_and_alloc_agree() {
+        use rand_core::RngCore;
+        use scrypt::{Params, Scrypt};
+
         let username = "worf@starship.enterprise";
         let password = "data_x_worf_4ever_<3";
         let mut bytes = [0u8; Salt::RECOMMENDED_LENGTH];
