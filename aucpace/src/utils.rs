@@ -7,7 +7,7 @@ use curve25519_dalek::{
     scalar::Scalar,
 };
 use password_hash::PasswordHash;
-use rand_core::{CryptoRng, RngCore};
+use rand_core::CryptoRngCore;
 
 #[allow(non_snake_case)]
 #[inline(always)]
@@ -38,7 +38,7 @@ create_h_impl!(H5, 5);
 #[inline(always)]
 pub(crate) fn generate_nonce<CSPRNG, const N: usize>(rng: &mut CSPRNG) -> [u8; N]
 where
-    CSPRNG: RngCore + CryptoRng,
+    CSPRNG: CryptoRngCore,
 {
     let mut nonce = [0; N];
     rng.fill_bytes(&mut nonce);
@@ -67,7 +67,7 @@ pub(crate) fn generate_keypair<D, CSPRNG, CI>(
 ) -> (Scalar, RistrettoPoint)
 where
     D: Digest<OutputSize = U64> + Default,
-    CSPRNG: RngCore + CryptoRng,
+    CSPRNG: CryptoRngCore,
     CI: AsRef<[u8]>,
 {
     let mut hasher: D = H1();
@@ -162,7 +162,7 @@ pub(crate) fn scalar_from_hash(pw_hash: PasswordHash<'_>) -> Result<Scalar> {
 #[inline(always)]
 pub(crate) fn generate_server_keypair<CSPRNG>(rng: &mut CSPRNG) -> (Scalar, RistrettoPoint)
 where
-    CSPRNG: RngCore + CryptoRng,
+    CSPRNG: CryptoRngCore,
 {
     // for ristretto255 the cofactor is 1, for normal curve25519 it is 8
     // this will need to be provided by a group trait in the future
@@ -177,9 +177,9 @@ where
 #[cfg(feature = "serde")]
 pub(crate) mod serde_saltstring {
     use core::fmt;
+    use password_hash::SaltString;
     use serde::de::{Error, Visitor};
     use serde::{Deserializer, Serializer};
-    use password_hash::SaltString;
 
     pub fn serialize<S>(data: &SaltString, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -216,9 +216,9 @@ pub(crate) mod serde_saltstring {
 #[cfg(any(feature = "serde"))]
 pub(crate) mod serde_paramsstring {
     use core::fmt;
+    use password_hash::ParamsString;
     use serde::de::{Error, Visitor};
     use serde::{Deserializer, Serializer};
-    use password_hash::ParamsString;
 
     pub fn serialize<S>(data: &ParamsString, serializer: S) -> Result<S::Ok, S::Error>
     where

@@ -13,7 +13,7 @@ use curve25519_dalek::{
     scalar::Scalar,
 };
 use password_hash::{ParamsString, SaltString};
-use rand_core::{CryptoRng, RngCore};
+use rand_core::CryptoRngCore;
 use subtle::ConstantTimeEq;
 
 #[cfg(feature = "partial_augmentation")]
@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 struct ServerSecret(u64);
 
 impl ServerSecret {
-    fn new<CSPRNG: RngCore + CryptoRng>(rng: &mut CSPRNG) -> Self {
+    fn new<CSPRNG: CryptoRngCore>(rng: &mut CSPRNG) -> Self {
         Self(rng.next_u64())
     }
 }
@@ -42,7 +42,7 @@ impl ServerSecret {
 pub struct AuCPaceServer<D, CSPRNG, const K1: usize>
 where
     D: Digest + Default,
-    CSPRNG: CryptoRng + RngCore,
+    CSPRNG: CryptoRngCore,
 {
     /// The CSPRNG used to generate random values where needed
     rng: CSPRNG,
@@ -56,7 +56,7 @@ where
 impl<D, CSPRNG, const K1: usize> AuCPaceServer<D, CSPRNG, K1>
 where
     D: Digest<OutputSize = U64> + Default,
-    CSPRNG: RngCore + CryptoRng,
+    CSPRNG: CryptoRngCore,
 {
     /// Create a new server
     pub fn new(mut rng: CSPRNG) -> Self {
@@ -144,7 +144,7 @@ where
 {
     fn new<CSPRNG>(secret: ServerSecret, rng: &mut CSPRNG) -> Self
     where
-        CSPRNG: RngCore + CryptoRng,
+        CSPRNG: CryptoRngCore,
     {
         Self {
             secret,
@@ -208,7 +208,7 @@ where
     where
         U: AsRef<[u8]>,
         DB: Database<PasswordVerifier = RistrettoPoint>,
-        CSPRNG: RngCore + CryptoRng,
+        CSPRNG: CryptoRngCore,
     {
         let (x, x_pub) = generate_server_keypair(&mut rng);
 
@@ -253,7 +253,7 @@ where
         U: AsRef<[u8]>,
         DB: Database<PasswordVerifier = RistrettoPoint>
             + PartialAugDatabase<PrivateKey = Scalar, PublicKey = RistrettoPoint>,
-        CSPRNG: RngCore + CryptoRng,
+        CSPRNG: CryptoRngCore,
     {
         let user = username.as_ref();
         let (prs, message) = if let Some((x, x_pub)) = database.lookup_long_term_keypair(user) {
@@ -302,7 +302,7 @@ where
     where
         U: AsRef<[u8]>,
         DB: StrongDatabase<PasswordVerifier = RistrettoPoint, Exponent = Scalar>,
-        CSPRNG: RngCore + CryptoRng,
+        CSPRNG: CryptoRngCore,
     {
         let (x, x_pub) = generate_server_keypair(&mut rng);
 
@@ -348,7 +348,7 @@ where
         U: AsRef<[u8]>,
         DB: StrongDatabase<PasswordVerifier = RistrettoPoint, Exponent = Scalar>
             + PartialAugDatabase<PrivateKey = Scalar, PublicKey = RistrettoPoint>,
-        CSPRNG: RngCore + CryptoRng,
+        CSPRNG: CryptoRngCore,
     {
         let user = username.as_ref();
         let (prs, message) = if let Some((x, x_pub)) = database.lookup_long_term_keypair(user) {
@@ -376,7 +376,7 @@ where
     ) -> ([u8; 32], ServerMessage<'static, K1>)
     where
         DB: Database<PasswordVerifier = RistrettoPoint>,
-        CSPRNG: RngCore + CryptoRng,
+        CSPRNG: CryptoRngCore,
     {
         if let Some((w, salt, sigma)) = database.lookup_verifier(username.as_ref()) {
             let cofactor = Scalar::ONE;
@@ -409,7 +409,7 @@ where
     ) -> ([u8; 32], ServerMessage<'static, K1>)
     where
         DB: StrongDatabase<PasswordVerifier = RistrettoPoint, Exponent = Scalar>,
-        CSPRNG: RngCore + CryptoRng,
+        CSPRNG: CryptoRngCore,
     {
         if let Some((w, q, sigma)) = database.lookup_verifier_strong(username.as_ref()) {
             let cofactor = Scalar::ONE;
@@ -437,7 +437,7 @@ where
         rng: &mut CSPRNG,
     ) -> ([u8; 32], ServerMessage<'static, K1>)
     where
-        CSPRNG: RngCore + CryptoRng,
+        CSPRNG: CryptoRngCore,
     {
         let prs = {
             let mut tmp = [0u8; 32];
@@ -478,7 +478,7 @@ where
         rng: &mut CSPRNG,
     ) -> ([u8; 32], ServerMessage<'static, K1>)
     where
-        CSPRNG: RngCore + CryptoRng,
+        CSPRNG: CryptoRngCore,
     {
         let prs = {
             let mut tmp = [0u8; 32];
@@ -509,7 +509,7 @@ where
 pub struct AuCPaceServerCPaceSubstep<D, CSPRNG, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
-    CSPRNG: RngCore + CryptoRng,
+    CSPRNG: CryptoRngCore,
 {
     ssid: Output<D>,
     prs: [u8; 32],
@@ -519,7 +519,7 @@ where
 impl<D, CSPRNG, const K1: usize> AuCPaceServerCPaceSubstep<D, CSPRNG, K1>
 where
     D: Digest<OutputSize = U64> + Default,
-    CSPRNG: RngCore + CryptoRng,
+    CSPRNG: CryptoRngCore,
 {
     fn new(ssid: Output<D>, prs: [u8; 32], rng: CSPRNG) -> Self {
         Self { ssid, prs, rng }

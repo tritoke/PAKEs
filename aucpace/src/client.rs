@@ -16,7 +16,7 @@ use curve25519_dalek::{
     scalar::Scalar,
 };
 use password_hash::{ParamsString, PasswordHash, PasswordHasher, Salt, SaltString};
-use rand_core::{CryptoRng, RngCore};
+use rand_core::CryptoRngCore;
 use subtle::ConstantTimeEq;
 
 #[cfg(feature = "strong_aucpace")]
@@ -36,7 +36,7 @@ pub struct AuCPaceClient<D, H, CSPRNG, const K1: usize>
 where
     D: Digest<OutputSize = U64> + Default,
     H: PasswordHasher,
-    CSPRNG: RngCore + CryptoRng,
+    CSPRNG: CryptoRngCore,
 {
     rng: CSPRNG,
     d: PhantomData<D>,
@@ -47,7 +47,7 @@ impl<D, H, CSPRNG, const K1: usize> AuCPaceClient<D, H, CSPRNG, K1>
 where
     D: Digest<OutputSize = U64> + Default,
     H: PasswordHasher,
-    CSPRNG: RngCore + CryptoRng,
+    CSPRNG: CryptoRngCore,
 {
     /// Create new server
     pub fn new(rng: CSPRNG) -> Self {
@@ -357,7 +357,7 @@ where
 {
     fn new<CSPRNG>(rng: &mut CSPRNG) -> Self
     where
-        CSPRNG: RngCore + CryptoRng,
+        CSPRNG: CryptoRngCore,
     {
         Self {
             nonce: generate_nonce(rng),
@@ -445,7 +445,7 @@ where
         ClientMessage<'a, K1>,
     )
     where
-        CSPRNG: RngCore + CryptoRng,
+        CSPRNG: CryptoRngCore,
     {
         // compute the blinding value and blind the hash of the username and password
         // ensuring that it is non-zero as required by `invert`
@@ -761,7 +761,7 @@ where
     )
     where
         CI: AsRef<[u8]>,
-        CSPRNG: RngCore + CryptoRng,
+        CSPRNG: CryptoRngCore,
     {
         let (priv_key, pub_key) =
             generate_keypair::<D, CSPRNG, CI>(rng, self.ssid, self.prs, channel_identifier);
