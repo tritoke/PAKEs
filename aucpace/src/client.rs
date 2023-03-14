@@ -1010,7 +1010,7 @@ pub enum ClientMessage<'a, const K1: usize> {
 mod tests {
     use super::*;
     use crate::Client;
-    use rand_core::OsRng;
+    use rand_core::{OsRng, RngCore};
 
     #[cfg(all(feature = "alloc", feature = "getrandom", feature = "scrypt"))]
     use scrypt::{Params, Scrypt};
