@@ -1013,7 +1013,7 @@ mod tests {
     #[test]
     #[cfg(all(feature = "alloc", feature = "getrandom", feature = "scrypt"))]
     fn test_hash_password_no_std_and_alloc_agree() {
-        use rand_core::RngCore;
+        use rand_core::{RngCore, OsRng};
         use scrypt::{Params, Scrypt};
 
         let username = "worf@starship.enterprise";
