@@ -1008,6 +1008,8 @@ pub enum ClientMessage<'a, const K1: usize> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     #[cfg(all(feature = "alloc", feature = "getrandom", feature = "scrypt"))]
     fn test_hash_password_no_std_and_alloc_agree() {

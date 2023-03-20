@@ -710,6 +710,8 @@ pub enum ServerMessage<'a, const K1: usize> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     #[cfg(all(feature = "sha2", feature = "getrandom"))]
     fn test_server_doesnt_accept_insecure_ssid() {
