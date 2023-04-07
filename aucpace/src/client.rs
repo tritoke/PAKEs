@@ -9,13 +9,13 @@ use crate::{
 use crate::constants::MIN_SSID_LEN;
 use core::marker::PhantomData;
 use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
+use curve25519_dalek::traits::IsIdentity;
 use curve25519_dalek::{
     digest::consts::U64,
     digest::{Digest, Output},
     ristretto::RistrettoPoint,
     scalar::Scalar,
 };
-use curve25519_dalek::traits::IsIdentity;
 use password_hash::{ParamsString, PasswordHash, PasswordHasher, Salt, SaltString};
 use rand_core::CryptoRngCore;
 use subtle::ConstantTimeEq;
@@ -1049,7 +1049,7 @@ mod tests {
     #[test]
     #[cfg(all(feature = "alloc", feature = "getrandom", feature = "scrypt"))]
     fn test_hash_password_no_std_and_alloc_agree() {
-        use rand_core::{RngCore, OsRng};
+        use rand_core::{OsRng, RngCore};
         use scrypt::{Params, Scrypt};
 
         let username = "worf@starship.enterprise";
@@ -1087,10 +1087,15 @@ mod tests {
         use crate::utils::H0;
         use curve25519_dalek::traits::Identity;
         let ssid = H0::<sha2::Sha512>().finalize();
-        let aug_client: AuCPaceClientAugLayer<'_, sha2::Sha512, scrypt::Scrypt, 16> = AuCPaceClientAugLayer::new(ssid, b"bob", b"bob's very secure password that nobody knows about, honest");
+        let aug_client: AuCPaceClientAugLayer<'_, sha2::Sha512, scrypt::Scrypt, 16> =
+            AuCPaceClientAugLayer::new(
+                ssid,
+                b"bob",
+                b"bob's very secure password that nobody knows about, honest",
+            );
         let res = aug_client.generate_cpace::<'_, &SaltString, 100>(
             RistrettoPoint::identity(),
-            &SaltString::new("saltyboi").unwrap(),
+            &SaltString::encode_b64(b"saltyboi").unwrap(),
             scrypt::Params::recommended(),
             scrypt::Scrypt,
         );
@@ -1102,17 +1107,21 @@ mod tests {
         }
     }
 
-
     #[test]
     #[cfg(all(feature = "sha2", feature = "scrypt", feature = "alloc"))]
     fn test_alloc_client_doesnt_accept_invalid_x_pub() {
         use crate::utils::H0;
         use curve25519_dalek::traits::Identity;
         let ssid = H0::<sha2::Sha512>().finalize();
-        let aug_client: AuCPaceClientAugLayer<'_, sha2::Sha512, scrypt::Scrypt, 16> = AuCPaceClientAugLayer::new(ssid, b"bob", b"bob's very secure password that nobody knows about, honest");
+        let aug_client: AuCPaceClientAugLayer<'_, sha2::Sha512, scrypt::Scrypt, 16> =
+            AuCPaceClientAugLayer::new(
+                ssid,
+                b"bob",
+                b"bob's very secure password that nobody knows about, honest",
+            );
         let res = aug_client.generate_cpace_alloc(
             RistrettoPoint::identity(),
-            &SaltString::new("saltyboi").unwrap(),
+            &SaltString::encode_b64(b"saltyboi").unwrap(),
             scrypt::Params::recommended(),
             scrypt::Scrypt,
         );
@@ -1132,7 +1141,13 @@ mod tests {
         use curve25519_dalek::traits::Identity;
 
         let ssid = H0::<sha2::Sha512>().finalize();
-        let aug_client: StrongAuCPaceClientAugLayer<'_, sha2::Sha512, scrypt::Scrypt, 16> = StrongAuCPaceClientAugLayer::new(ssid, b"bob", b"bob's very secure password that nobody knows about, honest", Scalar::from(69u32));
+        let aug_client: StrongAuCPaceClientAugLayer<'_, sha2::Sha512, scrypt::Scrypt, 16> =
+            StrongAuCPaceClientAugLayer::new(
+                ssid,
+                b"bob",
+                b"bob's very secure password that nobody knows about, honest",
+                Scalar::from(69u32),
+            );
         let res = aug_client.generate_cpace::<100>(
             RistrettoPoint::identity(),
             RISTRETTO_BASEPOINT_POINT,
@@ -1147,16 +1162,26 @@ mod tests {
         }
     }
 
-
     #[test]
-    #[cfg(all(feature = "sha2", feature = "scrypt", feature = "alloc", feature = "strong_aucpace"))]
+    #[cfg(all(
+        feature = "sha2",
+        feature = "scrypt",
+        feature = "alloc",
+        feature = "strong_aucpace"
+    ))]
     fn test_strong_alloc_client_doesnt_accept_invalid_x_pub() {
         use crate::utils::H0;
         use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
         use curve25519_dalek::traits::Identity;
 
         let ssid = H0::<sha2::Sha512>().finalize();
-        let aug_client: StrongAuCPaceClientAugLayer<'_, sha2::Sha512, scrypt::Scrypt, 16> = StrongAuCPaceClientAugLayer::new(ssid, b"bob", b"bob's very secure password that nobody knows about, honest", Scalar::from(69u32));
+        let aug_client: StrongAuCPaceClientAugLayer<'_, sha2::Sha512, scrypt::Scrypt, 16> =
+            StrongAuCPaceClientAugLayer::new(
+                ssid,
+                b"bob",
+                b"bob's very secure password that nobody knows about, honest",
+                Scalar::from(69u32),
+            );
         let res = aug_client.generate_cpace_alloc(
             RistrettoPoint::identity(),
             RISTRETTO_BASEPOINT_POINT,
@@ -1177,7 +1202,8 @@ mod tests {
         use crate::utils::H0;
         use curve25519_dalek::traits::Identity;
         let ssid = H0::<sha2::Sha512>().finalize();
-        let aug_client: AuCPaceClientRecvServerKey<sha2::Sha512, 16> = AuCPaceClientRecvServerKey::new(ssid, Scalar::from(420u32));
+        let aug_client: AuCPaceClientRecvServerKey<sha2::Sha512, 16> =
+            AuCPaceClientRecvServerKey::new(ssid, Scalar::from(420u32));
         let res = aug_client.receive_server_pubkey(RistrettoPoint::identity());
 
         if let Err(e) = res {
@@ -1193,7 +1219,8 @@ mod tests {
         use crate::utils::H0;
         use curve25519_dalek::traits::Identity;
         let ssid = H0::<sha2::Sha512>().finalize();
-        let aug_client: AuCPaceClientRecvServerKey<sha2::Sha512, 16> = AuCPaceClientRecvServerKey::new(ssid, Scalar::from(420u32));
+        let aug_client: AuCPaceClientRecvServerKey<sha2::Sha512, 16> =
+            AuCPaceClientRecvServerKey::new(ssid, Scalar::from(420u32));
         let res = aug_client.implicit_auth(RistrettoPoint::identity());
 
         if let Err(e) = res {
@@ -1204,14 +1231,25 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(feature = "sha2", feature = "scrypt", feature = "alloc", feature = "strong_aucpace"))]
+    #[cfg(all(
+        feature = "sha2",
+        feature = "scrypt",
+        feature = "alloc",
+        feature = "strong_aucpace"
+    ))]
     fn test_strong_alloc_client_doesnt_accept_invalid_salt() {
         use crate::utils::H0;
         use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
         use curve25519_dalek::traits::Identity;
 
         let ssid = H0::<sha2::Sha512>().finalize();
-        let aug_client: StrongAuCPaceClientAugLayer<'_, sha2::Sha512, scrypt::Scrypt, 16> = StrongAuCPaceClientAugLayer::new(ssid, b"bob", b"bob's very secure password that nobody knows about, honest", Scalar::from(69u32));
+        let aug_client: StrongAuCPaceClientAugLayer<'_, sha2::Sha512, scrypt::Scrypt, 16> =
+            StrongAuCPaceClientAugLayer::new(
+                ssid,
+                b"bob",
+                b"bob's very secure password that nobody knows about, honest",
+                Scalar::from(69u32),
+            );
         let res = aug_client.generate_cpace_alloc(
             RISTRETTO_BASEPOINT_POINT,
             RistrettoPoint::identity(),

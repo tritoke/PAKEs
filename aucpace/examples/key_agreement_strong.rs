@@ -86,7 +86,9 @@ fn main() -> Result<()> {
         client_message = recv!(stream, buf);
         let (server, message) =
             if let ClientMessage::StrongUsername { username, blinded } = client_message {
-                server.generate_client_info_strong(username, blinded, &database, OsRng).unwrap()
+                server
+                    .generate_client_info_strong(username, blinded, &database, OsRng)
+                    .unwrap()
             } else {
                 panic!("Received invalid client message {:?}", client_message);
             };

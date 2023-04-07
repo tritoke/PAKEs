@@ -6,13 +6,13 @@ use crate::utils::{
 use crate::Database;
 use crate::{Error, Result};
 use core::marker::PhantomData;
+use curve25519_dalek::traits::IsIdentity;
 use curve25519_dalek::{
     digest::consts::U64,
     digest::{Digest, Output},
     ristretto::RistrettoPoint,
     scalar::Scalar,
 };
-use curve25519_dalek::traits::IsIdentity;
 use password_hash::{ParamsString, SaltString};
 use rand_core::CryptoRngCore;
 use subtle::ConstantTimeEq;
@@ -417,7 +417,7 @@ where
             let prs = (w * (x * cofactor)).compress().to_bytes();
             let uq = blinded * (q * cofactor);
             if uq.is_identity() {
-                return Err(Error::IllegalPointError)
+                return Err(Error::IllegalPointError);
             }
             let message = ServerMessage::StrongAugmentationInfo {
                 // this will have to be provided by the trait in future
@@ -459,7 +459,7 @@ where
         // It is okay to expect here because SaltString has a buffer of 64 bytes by requirement
         // from the PHC spec. 48 bytes of data when encoded as base64 transform to 64 bytes.
         // This gives us the most entropy possible from the hash in the SaltString.
-        let salt = SaltString::b64_encode(&hash_bytes[..48])
+        let salt = SaltString::encode_b64(&hash_bytes[..48])
             .expect("SaltString maximum length invariant broken");
 
         let message = ServerMessage::AugmentationInfo {
@@ -500,7 +500,7 @@ where
 
         // check uq isn't the neutral element
         if fake_blinded_salt.is_identity() {
-            return Err(Error::IllegalPointError)
+            return Err(Error::IllegalPointError);
         }
 
         let message = ServerMessage::StrongAugmentationInfo {
@@ -730,9 +730,9 @@ pub enum ServerMessage<'a, const K1: usize> {
 #[cfg(test)]
 mod tests {
     #[allow(unused)]
-    use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
-    #[allow(unused)]
     use super::*;
+    #[allow(unused)]
+    use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
 
     #[test]
     #[cfg(all(feature = "sha2", feature = "getrandom"))]
@@ -750,7 +750,8 @@ mod tests {
         use crate::utils::H0;
         use curve25519_dalek::traits::Identity;
         let ssid = H0::<sha2::Sha512>().finalize();
-        let aug_server: AuCPaceServerRecvClientKey<sha2::Sha512, 16> = AuCPaceServerRecvClientKey::new(ssid, Scalar::from(420u32));
+        let aug_server: AuCPaceServerRecvClientKey<sha2::Sha512, 16> =
+            AuCPaceServerRecvClientKey::new(ssid, Scalar::from(420u32));
         let res = aug_server.receive_client_pubkey(RistrettoPoint::identity());
 
         if let Err(e) = res {
@@ -766,7 +767,8 @@ mod tests {
         use crate::utils::H0;
         use curve25519_dalek::traits::Identity;
         let ssid = H0::<sha2::Sha512>().finalize();
-        let aug_server: AuCPaceServerRecvClientKey<sha2::Sha512, 16> = AuCPaceServerRecvClientKey::new(ssid, Scalar::from(420u32));
+        let aug_server: AuCPaceServerRecvClientKey<sha2::Sha512, 16> =
+            AuCPaceServerRecvClientKey::new(ssid, Scalar::from(420u32));
         let res = aug_server.implicit_auth(RistrettoPoint::identity());
 
         if let Err(e) = res {
@@ -784,11 +786,25 @@ mod tests {
         type PasswordVerifier = RistrettoPoint;
         type Exponent = Scalar;
 
-        fn lookup_verifier_strong(&self, _username: &[u8]) -> Option<(Self::PasswordVerifier, Self::Exponent, ParamsString)> {
-            Some((RISTRETTO_BASEPOINT_POINT, Scalar::ZERO, ParamsString::default()))
+        fn lookup_verifier_strong(
+            &self,
+            _username: &[u8],
+        ) -> Option<(Self::PasswordVerifier, Self::Exponent, ParamsString)> {
+            Some((
+                RISTRETTO_BASEPOINT_POINT,
+                Scalar::ZERO,
+                ParamsString::default(),
+            ))
         }
 
-        fn store_verifier_strong(&mut self, _username: &[u8], _uad: Option<&[u8]>, _verifier: Self::PasswordVerifier, _secret_exponent: Self::Exponent, _params: ParamsString) {
+        fn store_verifier_strong(
+            &mut self,
+            _username: &[u8],
+            _uad: Option<&[u8]>,
+            _verifier: Self::PasswordVerifier,
+            _secret_exponent: Self::Exponent,
+            _params: ParamsString,
+        ) {
             unimplemented!()
         }
     }
@@ -798,11 +814,19 @@ mod tests {
         type PrivateKey = Scalar;
         type PublicKey = RistrettoPoint;
 
-        fn lookup_long_term_keypair(&self, _username: &[u8]) -> Option<(Self::PrivateKey, Self::PublicKey)> {
+        fn lookup_long_term_keypair(
+            &self,
+            _username: &[u8],
+        ) -> Option<(Self::PrivateKey, Self::PublicKey)> {
             Some((Scalar::ZERO, RISTRETTO_BASEPOINT_POINT))
         }
 
-        fn store_long_term_keypair(&mut self, _username: &[u8], _priv_key: Self::PrivateKey, _pub_key: Self::PublicKey) -> Result<()> {
+        fn store_long_term_keypair(
+            &mut self,
+            _username: &[u8],
+            _priv_key: Self::PrivateKey,
+            _pub_key: Self::PublicKey,
+        ) -> Result<()> {
             unimplemented!()
         }
     }
@@ -815,8 +839,14 @@ mod tests {
         use rand_core::OsRng;
 
         let ssid = H0::<sha2::Sha512>().finalize();
-        let aug_server: AuCPaceServerAugLayer<sha2::Sha512, 16> = AuCPaceServerAugLayer::new(ServerSecret(25519), ssid);
-        let res = aug_server.generate_client_info_strong(b"bobbyyyy", RistrettoPoint::identity(), &FakeDatabase(), OsRng);
+        let aug_server: AuCPaceServerAugLayer<sha2::Sha512, 16> =
+            AuCPaceServerAugLayer::new(ServerSecret(25519), ssid);
+        let res = aug_server.generate_client_info_strong(
+            b"bobbyyyy",
+            RistrettoPoint::identity(),
+            &FakeDatabase(),
+            OsRng,
+        );
 
         if let Err(e) = res {
             assert_eq!(e, Error::IllegalPointError);
@@ -833,8 +863,14 @@ mod tests {
         use rand_core::OsRng;
 
         let ssid = H0::<sha2::Sha512>().finalize();
-        let aug_server: AuCPaceServerAugLayer<sha2::Sha512, 16> = AuCPaceServerAugLayer::new(ServerSecret(25519), ssid);
-        let res = aug_server.generate_client_info_partial_strong(b"bobbyyyy", RistrettoPoint::identity(), &FakeDatabase(), OsRng);
+        let aug_server: AuCPaceServerAugLayer<sha2::Sha512, 16> =
+            AuCPaceServerAugLayer::new(ServerSecret(25519), ssid);
+        let res = aug_server.generate_client_info_partial_strong(
+            b"bobbyyyy",
+            RistrettoPoint::identity(),
+            &FakeDatabase(),
+            OsRng,
+        );
 
         if let Err(e) = res {
             assert_eq!(e, Error::IllegalPointError);
